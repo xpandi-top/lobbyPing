@@ -1,15 +1,16 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { Bell } from 'lucide-react'
+import { Bell, MapPin, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { getRoomByInviteCode, redeemInviteCode } from '@/lib/firestore'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { getRoomByInviteCode, redeemInviteCode, getBuilding } from '@/lib/firestore'
 
 const schema = z.object({
   buildingId: z.string().min(1, 'Building ID required'),
@@ -24,6 +25,16 @@ export default function JoinPage() {
   const defaultBuilding = searchParams.get('b') ?? ''
   const defaultCode = searchParams.get('code') ?? ''
   const [loading, setLoading] = useState(false)
+  const [buildingName, setBuildingName] = useState<string | null>(null)
+  const [buildingNotFound, setBuildingNotFound] = useState(false)
+
+  useEffect(() => {
+    if (!defaultBuilding) return
+    getBuilding(defaultBuilding).then((b) => {
+      if (b) setBuildingName(b.name)
+      else setBuildingNotFound(true)
+    }).catch(() => setBuildingNotFound(true))
+  }, [defaultBuilding])
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -62,6 +73,25 @@ export default function JoinPage() {
             Enter your invite code to receive arrival notifications
           </p>
         </div>
+
+        {/* Building confirmation */}
+        {buildingNotFound && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              Building not found. Check your invite link or contact your admin.
+            </AlertDescription>
+          </Alert>
+        )}
+        {buildingName && (
+          <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+            <MapPin className="h-4 w-4 text-primary shrink-0" />
+            <div>
+              <p className="text-xs text-muted-foreground">Registering for</p>
+              <p className="font-semibold text-sm">{buildingName}</p>
+            </div>
+          </div>
+        )}
 
         <Card>
           <CardHeader>

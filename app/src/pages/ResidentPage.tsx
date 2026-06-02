@@ -18,7 +18,7 @@ import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { getRoom, registerDevice, updateInstructions, respondToArrival } from '@/lib/firestore'
+import { getRoom, getBuilding, registerDevice, updateInstructions, respondToArrival } from '@/lib/firestore'
 import {
   collection, query, where, onSnapshot,
 } from 'firebase/firestore'
@@ -470,12 +470,17 @@ export default function ResidentPage() {
   const buildingId = searchParams.get('b') ?? ''
   const roomId = searchParams.get('r') ?? ''
   const [room, setRoom] = useState<Room | null>(null)
+  const [buildingName, setBuildingName] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!buildingId || !roomId) { setLoading(false); return }
-    getRoom(buildingId, roomId).then((r) => {
+    Promise.all([
+      getRoom(buildingId, roomId),
+      getBuilding(buildingId),
+    ]).then(([r, b]) => {
       setRoom(r)
+      if (b) setBuildingName(b.name)
       setLoading(false)
     })
   }, [buildingId, roomId])
@@ -518,7 +523,9 @@ export default function ResidentPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold">LobbyPing</h1>
-              <p className="text-sm text-muted-foreground">Room {room.number}</p>
+              <p className="text-sm text-muted-foreground">
+                {buildingName ? `${buildingName} · ` : ''}Room {room.number}
+              </p>
             </div>
           </div>
         </div>

@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { Bell, Package, Utensils, Users, HelpCircle, Clock } from 'lucide-react'
+import { Bell, Package, Utensils, Users, HelpCircle, Clock, MapPin } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -40,6 +40,23 @@ export default function VisitorPage() {
   const [arrivalType, setArrivalType] = useState<ArrivalType>('package')
   const [waitTime, setWaitTime] = useState<WaitTime>('2min')
   const [roomNumber, setRoomNumber] = useState('')
+  const [buildingName, setBuildingName] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!buildingParam) return
+    const load = async () => {
+      try {
+        if (!buildingParam.match(/^[A-Za-z0-9]{20}$/)) {
+          const b = await getBuildingBySlug(buildingParam)
+          if (b) setBuildingName(b.name)
+        } else {
+          const b = await getBuilding(buildingParam)
+          if (b) setBuildingName(b.name)
+        }
+      } catch { /* non-critical */ }
+    }
+    load()
+  }, [buildingParam])
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -97,7 +114,14 @@ export default function VisitorPage() {
             </div>
           </div>
           <h1 className="text-2xl font-bold tracking-tight">LobbyPing</h1>
-          <p className="text-muted-foreground text-sm">Notify a resident you've arrived</p>
+          {buildingName ? (
+            <div className="flex items-center justify-center gap-1.5 text-sm font-medium text-primary">
+              <MapPin className="h-3.5 w-3.5" />
+              <span>{buildingName}</span>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm">Notify a resident you've arrived</p>
+          )}
         </div>
 
         {/* Step: Room Number */}
