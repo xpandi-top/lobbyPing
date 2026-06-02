@@ -7,7 +7,7 @@ import QRCode from 'qrcode'
 import { toast } from 'sonner'
 import {
   Building2, Plus, QrCode, KeyRound, Copy, Printer, ShieldAlert,
-  Trash2, RefreshCw, ChevronLeft, Users, Home,
+  Trash2, RefreshCw, ChevronLeft, Users, Home, AlertTriangle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   createBuilding, listBuildings, deleteBuilding,
   createRoom, listRooms, deleteRoom, regenerateInviteCode,
@@ -213,6 +214,14 @@ function BuildingDetail({
   }, [building.id])
 
   async function onCreateRoom(data: RoomForm) {
+    // Uniqueness check — prevent two docs with same number
+    const duplicate = rooms.find(
+      (r) => r.number.trim().toLowerCase() === data.number.trim().toLowerCase()
+    )
+    if (duplicate) {
+      toast.error(`Room ${data.number} already exists. Use regenerate to get a new invite code.`)
+      return
+    }
     const code = generateInviteCode()
     try {
       await createRoom(building.id, data.number, code)
@@ -280,6 +289,16 @@ function BuildingDetail({
 
   const registeredCount = rooms.filter((r) => r.inviteRedeemed).length
 
+  // Detect duplicate room numbers already in Firestore
+  const numberCounts = rooms.reduce<Record<string, number>>((acc, r) => {
+    const key = r.number.trim().toLowerCase()
+    acc[key] = (acc[key] ?? 0) + 1
+    return acc
+  }, {})
+  const duplicateNumbers = Object.entries(numberCounts)
+    .filter(([, count]) => count > 1)
+    .map(([num]) => num)
+
   return (
     <div className="space-y-4">
       {/* Back + header */}
@@ -308,6 +327,17 @@ function BuildingDetail({
           </CardContent>
         </Card>
       </div>
+
+      {/* Duplicate room warning */}
+      {duplicateNumbers.length > 0 && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            Duplicate room numbers detected: <strong>{duplicateNumbers.join(', ')}</strong>.
+            Notifications only go to one. Delete duplicates and keep one per room number.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* QR Code */}
       <Card>
