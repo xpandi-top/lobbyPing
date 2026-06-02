@@ -5,6 +5,7 @@ import {
   getDocs,
   setDoc,
   updateDoc,
+  deleteDoc,
   onSnapshot,
   query,
   where,
@@ -34,6 +35,41 @@ export async function createBuilding(name: string, qrSlug: string): Promise<stri
   const ref = doc(collection(db, 'buildings'))
   await setDoc(ref, { name, qrSlug, createdAt: serverTimestamp() })
   return ref.id
+}
+
+export async function listBuildings(): Promise<Building[]> {
+  const snap = await getDocs(collection(db, 'buildings'))
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Building)
+}
+
+export async function deleteBuilding(buildingId: string): Promise<void> {
+  // Delete all rooms + their subcollections first (Firestore doesn't cascade)
+  const roomsSnap = await getDocs(collection(db, 'buildings', buildingId, 'rooms'))
+  for (const room of roomsSnap.docs) {
+    await deleteRoom(buildingId, room.id)
+  }
+  await deleteDoc(doc(db, 'buildings', buildingId))
+}
+
+export async function deleteRoom(buildingId: string, roomId: string): Promise<void> {
+  // Delete devices subcollection
+  const devSnap = await getDocs(collection(db, 'buildings', buildingId, 'rooms', roomId, 'devices'))
+  await Promise.all(devSnap.docs.map((d) => deleteDoc(d.ref)))
+  // Delete arrivals subcollection
+  const arrSnap = await getDocs(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'))
+  await Promise.all(arrSnap.docs.map((d) => deleteDoc(d.ref)))
+  await deleteDoc(doc(db, 'buildings', buildingId, 'rooms', roomId))
+}
+
+export async function regenerateInviteCode(
+  buildingId: string,
+  roomId: string,
+  newCode: string
+): Promise<void> {
+  await updateDoc(doc(db, 'buildings', buildingId, 'rooms', roomId), {
+    inviteCode: newCode.toUpperCase(),
+    inviteRedeemed: false,
+  })
 }
 
 // ── Rooms ──────────────────────────────────────────────────────────────────

@@ -2,21 +2,22 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Buildings: read by all, write by authenticated users (admin UI uses anonymous auth)
+    // Buildings: read by all, create/update/delete by authenticated users
     match /buildings/{buildingId} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow create, update, delete: if request.auth != null;
 
-      // Rooms: read by all, write by authenticated users
+      // Rooms: read by all, create/update/delete by authenticated users
       match /rooms/{roomId} {
         allow read: if true;
-        allow write: if request.auth != null;
+        allow create, update, delete: if request.auth != null;
 
-        // Devices: create by authenticated users, no read (privacy)
+        // Devices: create by authenticated users, no read (privacy), delete by auth (admin cleanup)
         match /devices/{deviceId} {
           allow read: if false;
           allow create: if request.auth != null;
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if request.auth != null;
         }
 
         // Arrivals
@@ -54,7 +55,7 @@ service cloud.firestore {
               )
             );
 
-          allow delete: if false;
+          allow delete: if request.auth != null;
         }
       }
     }
