@@ -59,6 +59,7 @@ export interface Device {
   role: UserRole
   userId: string          // anonymous auth UID
   codeId: string          // which InviteCode was used
+  name: string            // display name entered at join
   permissions: InviteCodePermissions
   registeredAt: Timestamp
 }
@@ -72,6 +73,8 @@ export interface Arrival {
   waitTime: WaitTime
   status: ArrivalStatus
   response: ResidentResponse | null
+  respondedByName: string | null   // name of device that responded
+  respondedByRole: UserRole | null // role of responder
   reminderCount: number
   createdAt: Timestamp
   expiresAt: Timestamp
@@ -85,6 +88,7 @@ export interface SavedRoom {
   deviceId: string
   userId: string
   role: UserRole
+  name: string          // display name
   buildingName: string
   roomNumber: string
   joinedAt: number  // Date.now()

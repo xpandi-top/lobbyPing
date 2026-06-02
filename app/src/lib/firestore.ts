@@ -211,7 +211,8 @@ export async function registerDevice(
   role: UserRole,
   userId: string,
   codeId: string,
-  permissions: InviteCodePermissions
+  permissions: InviteCodePermissions,
+  name: string
 ): Promise<string> {
   // Upsert by fcmToken
   const q = query(
@@ -220,14 +221,13 @@ export async function registerDevice(
   )
   const snap = await getDocs(q)
   if (!snap.empty) {
-    // Update existing
-    await updateDoc(snap.docs[0].ref, { fcmToken, platform, role, userId, codeId, permissions })
+    await updateDoc(snap.docs[0].ref, { fcmToken, platform, role, userId, codeId, permissions, name })
     return snap.docs[0].id
   }
 
   const ref = doc(collection(db, 'buildings', buildingId, 'rooms', roomId, 'devices'))
   await setDoc(ref, {
-    fcmToken, platform, role, userId, codeId, permissions,
+    fcmToken, platform, role, userId, codeId, permissions, name,
     registeredAt: serverTimestamp(),
   })
   return ref.id
@@ -274,8 +274,9 @@ export async function createArrival(
   const ref = doc(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'))
   await setDoc(ref, {
     buildingId, roomId, roomNumber, type, waitTime,
-    status: 'pending', response: null, reminderCount: 0,
-    createdAt: now, expiresAt,
+    status: 'pending', response: null,
+    respondedByName: null, respondedByRole: null,
+    reminderCount: 0, createdAt: now, expiresAt,
   })
   return ref.id
 }
@@ -311,11 +312,13 @@ export async function respondToArrival(
   buildingId: string,
   roomId: string,
   arrivalId: string,
-  response: ResidentResponse
+  response: ResidentResponse,
+  responderName: string,
+  responderRole: UserRole
 ): Promise<void> {
   await updateDoc(
     doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
-    { response, status: 'responded' }
+    { response, status: 'responded', respondedByName: responderName, respondedByRole: responderRole }
   )
 }
 

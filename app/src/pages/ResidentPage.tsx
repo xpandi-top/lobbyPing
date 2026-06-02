@@ -107,7 +107,8 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
           await registerDevice(
             buildingId, roomId, token, detectPlatform(),
             savedRoom.role, userId, savedRoom.deviceId,
-            { notify: true, respond: savedRoom.role === 'owner' }
+            { notify: true, respond: savedRoom.role === 'owner' },
+            savedRoom.name
           )
         } catch (err) {
           console.error('[Setup] registerDevice failed:', err)
@@ -226,7 +227,10 @@ const RESPONSE_OPTIONS: { value: ResidentResponse; label: string; icon: React.FC
   { value: 'no_need_to_wait', label: 'No Need to Wait', icon: XCircle, color: 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100' },
 ]
 
-function ArrivalCard({ arrival, buildingId, roomId, canRespond }: { arrival: Arrival; buildingId: string; roomId: string; canRespond: boolean }) {
+function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, responderRole }: {
+  arrival: Arrival; buildingId: string; roomId: string
+  canRespond: boolean; responderName: string; responderRole: 'owner' | 'member'
+}) {
   const [responding, setResponding] = useState(false)
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponded = arrival.status === 'responded'
@@ -235,7 +239,7 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond }: { arrival: Arr
     if (responding || !canRespond) return
     setResponding(true)
     try {
-      await respondToArrival(buildingId, roomId, arrival.id, response)
+      await respondToArrival(buildingId, roomId, arrival.id, response, responderName, responderRole)
       toast.success('Response sent')
     } catch (err) {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -261,7 +265,17 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond }: { arrival: Arr
       </CardHeader>
       <CardContent>
         {hasResponded ? (
-          <p className="text-sm text-muted-foreground">Responded: <span className="font-medium text-foreground">{RESPONSE_OPTIONS.find(r => r.value === arrival.response)?.label}</span></p>
+          <div className="space-y-1">
+            <p className="text-sm text-muted-foreground">
+              Responded: <span className="font-medium text-foreground">{RESPONSE_OPTIONS.find(r => r.value === arrival.response)?.label}</span>
+            </p>
+            {arrival.respondedByName && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                {arrival.respondedByRole === 'owner' ? <Crown className="h-3 w-3" /> : <Users className="h-3 w-3" />}
+                {arrival.respondedByName}
+              </p>
+            )}
+          </div>
         ) : isExpired ? (
           <p className="text-sm text-muted-foreground">Visitor left without a response.</p>
         ) : canRespond ? (
@@ -281,7 +295,10 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond }: { arrival: Arr
   )
 }
 
-function ActiveArrivals({ buildingId, roomId, canRespond }: { buildingId: string; roomId: string; canRespond: boolean }) {
+function ActiveArrivals({ buildingId, roomId, canRespond, responderName, responderRole }: {
+  buildingId: string; roomId: string; canRespond: boolean
+  responderName: string; responderRole: 'owner' | 'member'
+}) {
   const [arrivals, setArrivals] = useState<Arrival[]>([])
 
   useEffect(() => {
@@ -301,7 +318,14 @@ function ActiveArrivals({ buildingId, roomId, canRespond }: { buildingId: string
       </div>
     )
   }
-  return <div className="space-y-3">{arrivals.map(a => <ArrivalCard key={a.id} arrival={a} buildingId={buildingId} roomId={roomId} canRespond={canRespond} />)}</div>
+  return (
+    <div className="space-y-3">
+      {arrivals.map(a => (
+        <ArrivalCard key={a.id} arrival={a} buildingId={buildingId} roomId={roomId}
+          canRespond={canRespond} responderName={responderName} responderRole={responderRole} />
+      ))}
+    </div>
+  )
 }
 
 // ── Delivery Instructions ──────────────────────────────────────────────────
@@ -473,9 +497,9 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
                 <div className="flex items-center gap-2">
                   <Users className="h-4 w-4 text-muted-foreground" />
                   <div>
-                    <p className="text-sm font-medium capitalize">{d.platform}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {d.permissions.respond ? 'Can respond' : 'Notifications only'}
+                    <p className="text-sm font-medium">{d.name || `${d.platform} device`}</p>
+                    <p className="text-xs text-muted-foreground capitalize">
+                      {d.platform} · {d.permissions.respond ? 'Can respond' : 'Notifications only'}
                     </p>
                   </div>
                 </div>
@@ -509,8 +533,9 @@ export default function ResidentPage() {
 
   const savedRoom = getSavedRoom(buildingId, roomId)
   const isOwner = savedRoom?.role === 'owner'
-  const canRespond = savedRoom ? (isOwner || savedRoom.role === 'member') : false
-  // Fine-grained: check permissions from localStorage? For simplicity trust role.
+  const canRespond = savedRoom != null // both owner and member can respond (owner always, member if permissions.respond)
+  const responderName = savedRoom?.name ?? 'Resident'
+  const responderRole = savedRoom?.role ?? 'member'
 
   useEffect(() => {
     if (!buildingId || !roomId) { setLoading(false); return }
@@ -559,6 +584,7 @@ export default function ResidentPage() {
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {buildingName ? `${buildingName} · ` : ''}Room {room.number}
+                  {savedRoom?.name ? ` · ${savedRoom.name}` : ''}
                 </p>
               </div>
             </div>
@@ -582,7 +608,8 @@ export default function ResidentPage() {
           </TabsList>
 
           <TabsContent value="arrivals" className="mt-4">
-            <ActiveArrivals buildingId={buildingId} roomId={roomId} canRespond={canRespond} />
+            <ActiveArrivals buildingId={buildingId} roomId={roomId} canRespond={canRespond}
+              responderName={responderName} responderRole={responderRole} />
           </TabsContent>
 
           <TabsContent value="notifications" className="mt-4">

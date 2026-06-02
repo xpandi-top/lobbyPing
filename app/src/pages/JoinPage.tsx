@@ -19,6 +19,7 @@ import { saveRoom, getSavedRooms } from '@/lib/storage'
 const schema = z.object({
   buildingId: z.string().min(1, 'Building ID required'),
   code: z.string().min(4, 'Invite code required').max(12),
+  name: z.string().min(1, 'Your name required').max(40),
 })
 
 type FormData = z.infer<typeof schema>
@@ -45,7 +46,7 @@ export default function JoinPage() {
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { buildingId: defaultBuilding, code: defaultCode },
+    defaultValues: { buildingId: defaultBuilding, code: defaultCode, name: '' },
   })
 
   async function onSubmit(data: FormData) {
@@ -66,7 +67,7 @@ export default function JoinPage() {
       const fcmToken = await getFCMToken() ?? `no-token-${Date.now()}`
       const deviceId = await registerDevice(
         data.buildingId, roomId, fcmToken, detectPlatform(),
-        inviteCode.role, userId, inviteCode.id, inviteCode.permissions
+        inviteCode.role, userId, inviteCode.id, inviteCode.permissions, data.name
       )
 
       // Mark code as redeemed
@@ -85,6 +86,7 @@ export default function JoinPage() {
         deviceId,
         userId,
         role: inviteCode.role,
+        name: data.name,
         buildingName: building?.name ?? 'Unknown Building',
         roomNumber: room?.number ?? '?',
         joinedAt: Date.now(),
@@ -142,6 +144,11 @@ export default function JoinPage() {
                   {errors.buildingId && <p className="text-sm text-destructive">{errors.buildingId.message}</p>}
                 </div>
               )}
+              <div className="space-y-2">
+                <Label htmlFor="name">Your name</Label>
+                <Input id="name" placeholder="e.g. Alice" autoComplete="given-name" {...register('name')} />
+                {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="code">Invite Code</Label>
                 <Input id="code" placeholder="e.g. ABC123" autoCapitalize="characters"
