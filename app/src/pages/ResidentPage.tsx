@@ -8,7 +8,7 @@ import {
   Bell, CheckCircle2, AlertTriangle, Share, PlusSquare, Smartphone,
   BellRing, Volume2, Settings, Package, Utensils, Users,
   ArrowDownToLine, XCircle, Clock, Crown, Plus, Trash2, KeyRound,
-  Home, LogOut, Copy, Calendar,
+  Home, LogOut, Copy, Calendar, MessageCircle,
 } from 'lucide-react'
 import { getAuth } from 'firebase/auth'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
@@ -221,6 +221,22 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
 
 const TYPE_LABELS: Record<ArrivalType, string> = { package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Other' }
 const WAIT_LABELS: Record<string, string> = { '1min': '1 min', '2min': '2 min', '5min': '5 min' }
+const WAIT_MS: Record<string, number> = { '1min': 60_000, '2min': 120_000, '5min': 300_000 }
+
+function useElapsed(createdAtMs: number) {
+  const [elapsed, setElapsed] = useState(Date.now() - createdAtMs)
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Date.now() - createdAtMs), 1000)
+    return () => clearInterval(id)
+  }, [createdAtMs])
+  return elapsed
+}
+
+function formatElapsed(ms: number) {
+  const s = Math.floor(ms / 1000)
+  const m = Math.floor(s / 60)
+  return m === 0 ? `${s}s` : `${m}m ${(s % 60).toString().padStart(2, '0')}s`
+}
 const RESPONSE_OPTIONS: { value: ResidentResponse; label: string; icon: React.FC<{className?: string}>; color: string }[] = [
   { value: 'coming_down', label: 'Coming Down', icon: ArrowDownToLine, color: 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100' },
   { value: 'leave_in_lobby', label: 'Leave in Lobby', icon: CheckCircle2, color: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' },
@@ -234,6 +250,10 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
   const [responding, setResponding] = useState(false)
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponded = arrival.status === 'responded'
+  const elapsed = useElapsed(arrival.createdAt.toMillis())
+  const waitMs = WAIT_MS[arrival.waitTime] ?? 120_000
+  const waitProgress = Math.min(100, Math.round((elapsed / waitMs) * 100))
+  const overWait = elapsed > waitMs
 
   async function handleResponse(response: ResidentResponse) {
     if (responding || !canRespond) return
@@ -248,8 +268,8 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
   }
 
   return (
-    <Card className={cn('border-2', isExpired ? 'opacity-50' : hasResponded ? 'border-green-200' : 'border-primary/30 shadow-md')}>
-      <CardHeader className="pb-3">
+    <Card className={cn('border-2', isExpired ? 'opacity-60' : hasResponded ? 'border-green-200' : 'border-primary/30 shadow-md')}>
+      <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CardTitle className="text-base">{TYPE_LABELS[arrival.type] ?? arrival.type}</CardTitle>
@@ -258,26 +278,60 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
             {isExpired && <Badge variant="outline" className="text-xs">Expired</Badge>}
           </div>
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock className="h-3 w-3" />{WAIT_LABELS[arrival.waitTime] ?? arrival.waitTime}
-            {arrival.reminderCount > 0 && <span className="ml-1 text-orange-500">· {arrival.reminderCount}×</span>}
+            {arrival.reminderCount > 0 && <span className="text-orange-500">{arrival.reminderCount}× </span>}
+            <Clock className="h-3 w-3" />
+            <span className={cn('font-mono', overWait && !hasResponded && !isExpired ? 'text-destructive font-semibold' : '')}>
+              {formatElapsed(elapsed)}
+            </span>
           </div>
         </div>
+        {/* Wait progress bar — only show while pending */}
+        {!hasResponded && !isExpired && (
+          <div className="mt-2 space-y-0.5">
+            <Progress value={waitProgress} className={cn('h-1', overWait ? '[&>div]:bg-destructive' : '')} />
+            <p className="text-xs text-muted-foreground">
+              {overWait ? 'Past expected wait time' : `Expected: ${WAIT_LABELS[arrival.waitTime]}`}
+            </p>
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         {hasResponded ? (
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">
-              Responded: <span className="font-medium text-foreground">{RESPONSE_OPTIONS.find(r => r.value === arrival.response)?.label}</span>
-            </p>
-            {arrival.respondedByName && (
-              <p className="text-xs text-muted-foreground flex items-center gap-1">
-                {arrival.respondedByRole === 'owner' ? <Crown className="h-3 w-3" /> : <Users className="h-3 w-3" />}
-                {arrival.respondedByName}
+          <div className="space-y-2">
+            <div className="space-y-0.5">
+              <p className="text-sm text-muted-foreground">
+                Responded: <span className="font-medium text-foreground">{RESPONSE_OPTIONS.find(r => r.value === arrival.response)?.label}</span>
               </p>
+              {arrival.respondedByName && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  {arrival.respondedByRole === 'owner' ? <Crown className="h-3 w-3" /> : <Users className="h-3 w-3" />}
+                  {arrival.respondedByName}
+                </p>
+              )}
+            </div>
+            {arrival.visitorAck && (
+              <div className="rounded-md bg-muted px-3 py-2 flex items-start gap-2">
+                <MessageCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Visitor replied</p>
+                  <p className="text-sm">{arrival.visitorAck}</p>
+                </div>
+              </div>
             )}
           </div>
         ) : isExpired ? (
-          <p className="text-sm text-muted-foreground">Visitor left without a response.</p>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">No response — visitor left.</p>
+            {arrival.visitorAck && (
+              <div className="rounded-md bg-muted px-3 py-2 flex items-start gap-2">
+                <MessageCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Visitor's note</p>
+                  <p className="text-sm">{arrival.visitorAck}</p>
+                </div>
+              </div>
+            )}
+          </div>
         ) : canRespond ? (
           <div className="space-y-2">
             {RESPONSE_OPTIONS.map(({ value, label, icon: Icon, color }) => (

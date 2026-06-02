@@ -276,6 +276,7 @@ export async function createArrival(
     buildingId, roomId, roomNumber, type, waitTime,
     status: 'pending', response: null,
     respondedByName: null, respondedByRole: null,
+    visitorAck: null, visitorAckTime: null,
     reminderCount: 0, createdAt: now, expiresAt,
   })
   return ref.id
@@ -319,6 +320,18 @@ export async function respondToArrival(
   await updateDoc(
     doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
     { response, status: 'responded', respondedByName: responderName, respondedByRole: responderRole }
+  )
+}
+
+export async function sendVisitorAck(
+  buildingId: string,
+  roomId: string,
+  arrivalId: string,
+  message: string
+): Promise<void> {
+  await updateDoc(
+    doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
+    { visitorAck: message, visitorAckTime: serverTimestamp() }
   )
 }
 

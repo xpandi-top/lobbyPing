@@ -73,8 +73,10 @@ export interface Arrival {
   waitTime: WaitTime
   status: ArrivalStatus
   response: ResidentResponse | null
-  respondedByName: string | null   // name of device that responded
-  respondedByRole: UserRole | null // role of responder
+  respondedByName: string | null
+  respondedByRole: UserRole | null
+  visitorAck: string | null        // visitor's acknowledgment after resident responds (or final msg)
+  visitorAckTime: Timestamp | null
   reminderCount: number
   createdAt: Timestamp
   expiresAt: Timestamp
