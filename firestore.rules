@@ -2,27 +2,28 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Buildings: read-only for all (visitors need to look up building by slug)
+    // Buildings: read by all, write by authenticated users (admin UI uses anonymous auth)
     match /buildings/{buildingId} {
       allow read: if true;
-      allow write: if false; // admin SDK only
+      allow write: if request.auth != null;
 
-      // Rooms: read-only (room lookup by number for visitors)
+      // Rooms: read by all, write by authenticated users
       match /rooms/{roomId} {
         allow read: if true;
-        allow write: if false; // admin SDK only
+        allow write: if request.auth != null;
 
-        // Devices: write by owner device only — no read (privacy)
+        // Devices: create by authenticated users, no read (privacy)
         match /devices/{deviceId} {
           allow read: if false;
-          allow create: if true; // anonymous device registration
+          allow create: if request.auth != null;
           allow update, delete: if false;
         }
 
         // Arrivals
         match /arrivals/{arrivalId} {
-          // Visitors can create arrivals
+          // Visitors can create arrivals (must be authenticated)
           allow create: if
+            request.auth != null &&
             request.resource.data.keys().hasAll(['buildingId','roomId','roomNumber','type','waitTime','status','response','reminderCount','createdAt','expiresAt']) &&
             request.resource.data.status == 'pending' &&
             request.resource.data.response == null &&
@@ -35,19 +36,22 @@ service cloud.firestore {
 
           // Update: visitor can increment reminderCount (max 3), resident can set response
           allow update: if
-            // Visitor sending a reminder
+            request.auth != null &&
             (
-              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reminderCount']) &&
-              request.resource.data.reminderCount <= 3 &&
-              request.resource.data.reminderCount == resource.data.reminderCount + 1 &&
-              resource.data.status == 'pending'
-            ) ||
-            // Resident responding
-            (
-              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['response','status']) &&
-              request.resource.data.response in ['coming_down','leave_in_lobby','no_need_to_wait'] &&
-              request.resource.data.status == 'responded' &&
-              resource.data.status == 'pending'
+              // Visitor sending a reminder
+              (
+                request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reminderCount']) &&
+                request.resource.data.reminderCount <= 3 &&
+                request.resource.data.reminderCount == resource.data.reminderCount + 1 &&
+                resource.data.status == 'pending'
+              ) ||
+              // Resident responding
+              (
+                request.resource.data.diff(resource.data).affectedKeys().hasOnly(['response','status']) &&
+                request.resource.data.response in ['coming_down','leave_in_lobby','no_need_to_wait'] &&
+                request.resource.data.status == 'responded' &&
+                resource.data.status == 'pending'
+              )
             );
 
           allow delete: if false;
