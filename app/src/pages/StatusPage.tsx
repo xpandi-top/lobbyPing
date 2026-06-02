@@ -238,7 +238,10 @@ export default function StatusPage() {
   const TypeIcon = TYPE_ICONS[arrival.type]
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponse = arrival.status === 'responded' && arrival.response
-  const noResponse = isExpired && !hasResponse
+  // Show "no response" state when:
+  // - Formally expired (Firestore status), OR
+  // - Visitor's chosen wait time has elapsed with no response yet
+  const noResponse = !hasResponse && (isExpired || overWait)
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
@@ -300,7 +303,9 @@ export default function StatusPage() {
               <>
                 <div className="text-center space-y-2">
                   <Clock className="h-10 w-10 mx-auto text-muted-foreground" />
-                  <p className="text-lg font-semibold">No response received</p>
+                  <p className="text-lg font-semibold">
+                    {isExpired ? 'No response received' : 'Wait time passed'}
+                  </p>
                   {instructions && (
                     <div className="rounded-md bg-muted p-3 text-left mt-2">
                       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
