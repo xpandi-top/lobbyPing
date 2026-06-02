@@ -1,0 +1,13 @@
+githubPassword
+icon-dark.png
+icon-light.png
+node_modules/
+app/node_modules/
+app/dist/
+functions/node_modules/
+functions/lib/
+app/.env
+app/.env.local
+.firebase/
+*.log
+.DS_Store
