@@ -53,15 +53,21 @@ export default function VisitorPage() {
   async function onSend() {
     setStep('sending')
     try {
-      let buildingId = buildingParam ?? ''
-      // Support both slug and direct ID
-      if (buildingId && !buildingId.match(/^[A-Za-z0-9]{20}$/)) {
+      if (!buildingParam) {
+        toast.error('Invalid QR code link — missing building ID.')
+        setStep('wait')
+        return
+      }
+
+      let buildingId = buildingParam
+      // Slug (short, human-readable) vs Firestore auto-ID (20 alphanum chars)
+      if (!buildingId.match(/^[A-Za-z0-9]{20}$/)) {
         const building = await getBuildingBySlug(buildingId)
-        if (!building) { toast.error('Building not found'); setStep('wait'); return }
+        if (!building) { toast.error('Building not found.'); setStep('wait'); return }
         buildingId = building.id
       } else {
         const building = await getBuilding(buildingId)
-        if (!building) { toast.error('Building not found'); setStep('wait'); return }
+        if (!building) { toast.error('Building not found.'); setStep('wait'); return }
       }
 
       const room = await getRoomByNumber(buildingId, roomNumber)
@@ -73,8 +79,9 @@ export default function VisitorPage() {
 
       const arrivalId = await createArrival(buildingId, room.id, roomNumber, arrivalType, waitTime)
       navigate(`/status?b=${buildingId}&r=${room.id}&a=${arrivalId}`)
-    } catch {
-      toast.error('Failed to send notification. Please try again.')
+    } catch (err) {
+      console.error('[VisitorPage] onSend error:', err)
+      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
       setStep('wait')
     }
   }
