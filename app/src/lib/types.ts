@@ -1,12 +1,10 @@
 import type { Timestamp } from 'firebase/firestore'
 
 export type ArrivalType = 'package' | 'food' | 'guest' | 'other'
-
 export type WaitTime = '1min' | '2min' | '5min'
-
 export type ArrivalStatus = 'pending' | 'responded' | 'expired'
-
 export type ResidentResponse = 'coming_down' | 'leave_in_lobby' | 'no_need_to_wait'
+export type UserRole = 'owner' | 'member'
 
 export interface Building {
   id: string
@@ -19,10 +17,11 @@ export interface Room {
   id: string
   buildingId: string
   number: string
-  inviteCode: string
-  inviteRedeemed: boolean
   instructions: DeliveryInstructions
   createdAt: Timestamp
+  // Legacy fields — kept for backward compat, no longer written
+  inviteCode?: string
+  inviteRedeemed?: boolean
 }
 
 export interface DeliveryInstructions {
@@ -31,12 +30,36 @@ export interface DeliveryInstructions {
   guest: string
 }
 
+export interface InviteCodePermissions {
+  notify: boolean    // device receives push notifications
+  respond: boolean   // device can respond to arrivals
+}
+
+export interface InviteCode {
+  id: string
+  code: string
+  buildingId: string
+  roomId: string
+  role: UserRole
+  redeemed: boolean
+  redeemedAt: Timestamp | null
+  redeemedByDeviceId: string | null
+  createdBy: 'admin' | string  // 'admin' or owner deviceId
+  expiresAt: Timestamp | null  // null = never expires
+  permissions: InviteCodePermissions
+  createdAt: Timestamp
+}
+
 export interface Device {
   id: string
   roomId: string
   buildingId: string
   fcmToken: string
   platform: 'ios' | 'android' | 'web'
+  role: UserRole
+  userId: string          // anonymous auth UID
+  codeId: string          // which InviteCode was used
+  permissions: InviteCodePermissions
   registeredAt: Timestamp
 }
 
@@ -52,4 +75,17 @@ export interface Arrival {
   reminderCount: number
   createdAt: Timestamp
   expiresAt: Timestamp
+}
+
+// ── Stored locally per joined room ──────────────────────────────────────────
+
+export interface SavedRoom {
+  buildingId: string
+  roomId: string
+  deviceId: string
+  userId: string
+  role: UserRole
+  buildingName: string
+  roomNumber: string
+  joinedAt: number  // Date.now()
 }

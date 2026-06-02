@@ -1,5 +1,6 @@
 import {
   collection,
+  collectionGroup,
   doc,
   getDoc,
   getDocs,
@@ -9,11 +10,15 @@ import {
   onSnapshot,
   query,
   where,
+  orderBy,
   Timestamp,
   serverTimestamp,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import type { Building, Room, Device, Arrival, DeliveryInstructions, ArrivalType, WaitTime, ResidentResponse } from './types'
+import type {
+  Building, Room, Device, Arrival, InviteCode, InviteCodePermissions,
+  DeliveryInstructions, ArrivalType, WaitTime, ResidentResponse, UserRole,
+} from './types'
 
 // ── Buildings ──────────────────────────────────────────────────────────────
 
@@ -43,33 +48,11 @@ export async function listBuildings(): Promise<Building[]> {
 }
 
 export async function deleteBuilding(buildingId: string): Promise<void> {
-  // Delete all rooms + their subcollections first (Firestore doesn't cascade)
   const roomsSnap = await getDocs(collection(db, 'buildings', buildingId, 'rooms'))
   for (const room of roomsSnap.docs) {
     await deleteRoom(buildingId, room.id)
   }
   await deleteDoc(doc(db, 'buildings', buildingId))
-}
-
-export async function deleteRoom(buildingId: string, roomId: string): Promise<void> {
-  // Delete devices subcollection
-  const devSnap = await getDocs(collection(db, 'buildings', buildingId, 'rooms', roomId, 'devices'))
-  await Promise.all(devSnap.docs.map((d) => deleteDoc(d.ref)))
-  // Delete arrivals subcollection
-  const arrSnap = await getDocs(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'))
-  await Promise.all(arrSnap.docs.map((d) => deleteDoc(d.ref)))
-  await deleteDoc(doc(db, 'buildings', buildingId, 'rooms', roomId))
-}
-
-export async function regenerateInviteCode(
-  buildingId: string,
-  roomId: string,
-  newCode: string
-): Promise<void> {
-  await updateDoc(doc(db, 'buildings', buildingId, 'rooms', roomId), {
-    inviteCode: newCode.toUpperCase(),
-    inviteRedeemed: false,
-  })
 }
 
 // ── Rooms ──────────────────────────────────────────────────────────────────
@@ -91,38 +74,33 @@ export async function getRoomByNumber(buildingId: string, number: string): Promi
   return { id: d.id, buildingId, ...d.data() } as Room
 }
 
-export async function getRoomByInviteCode(buildingId: string, code: string): Promise<Room | null> {
-  const q = query(
-    collection(db, 'buildings', buildingId, 'rooms'),
-    where('inviteCode', '==', code.toUpperCase()),
-    where('inviteRedeemed', '==', false)
-  )
-  const snap = await getDocs(q)
-  if (snap.empty) return null
-  const d = snap.docs[0]
-  return { id: d.id, buildingId, ...d.data() } as Room
-}
-
-export async function createRoom(
-  buildingId: string,
-  number: string,
-  inviteCode: string
-): Promise<string> {
+export async function createRoom(buildingId: string, number: string): Promise<string> {
   const ref = doc(collection(db, 'buildings', buildingId, 'rooms'))
   await setDoc(ref, {
     number,
-    inviteCode: inviteCode.toUpperCase(),
-    inviteRedeemed: false,
     instructions: { package: '', food: '', guest: '' },
     createdAt: serverTimestamp(),
   })
   return ref.id
 }
 
-export async function redeemInviteCode(buildingId: string, roomId: string): Promise<void> {
-  await updateDoc(doc(db, 'buildings', buildingId, 'rooms', roomId), {
-    inviteRedeemed: true,
-  })
+export async function deleteRoom(buildingId: string, roomId: string): Promise<void> {
+  const [devSnap, arrSnap, codeSnap] = await Promise.all([
+    getDocs(collection(db, 'buildings', buildingId, 'rooms', roomId, 'devices')),
+    getDocs(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals')),
+    getDocs(collection(db, 'buildings', buildingId, 'rooms', roomId, 'inviteCodes')),
+  ])
+  await Promise.all([
+    ...devSnap.docs.map((d) => deleteDoc(d.ref)),
+    ...arrSnap.docs.map((d) => deleteDoc(d.ref)),
+    ...codeSnap.docs.map((d) => deleteDoc(d.ref)),
+  ])
+  await deleteDoc(doc(db, 'buildings', buildingId, 'rooms', roomId))
+}
+
+export async function listRooms(buildingId: string): Promise<Room[]> {
+  const snap = await getDocs(collection(db, 'buildings', buildingId, 'rooms'))
+  return snap.docs.map((d) => ({ id: d.id, buildingId, ...d.data() }) as Room)
 }
 
 export async function updateInstructions(
@@ -133,9 +111,94 @@ export async function updateInstructions(
   await updateDoc(doc(db, 'buildings', buildingId, 'rooms', roomId), { instructions })
 }
 
-export async function listRooms(buildingId: string): Promise<Room[]> {
-  const snap = await getDocs(collection(db, 'buildings', buildingId, 'rooms'))
-  return snap.docs.map((d) => ({ id: d.id, buildingId, ...d.data() }) as Room)
+// ── Invite Codes ───────────────────────────────────────────────────────────
+
+export async function createInviteCode(
+  buildingId: string,
+  roomId: string,
+  code: string,
+  role: UserRole,
+  createdBy: 'admin' | string,
+  options?: {
+    expiresAt?: Timestamp | null
+    permissions?: InviteCodePermissions
+  }
+): Promise<string> {
+  const ref = doc(collection(db, 'buildings', buildingId, 'rooms', roomId, 'inviteCodes'))
+  await setDoc(ref, {
+    code: code.toUpperCase(),
+    buildingId,
+    roomId,
+    role,
+    redeemed: false,
+    redeemedAt: null,
+    redeemedByDeviceId: null,
+    createdBy,
+    expiresAt: options?.expiresAt ?? null,
+    permissions: options?.permissions ?? { notify: true, respond: role === 'owner' },
+    createdAt: serverTimestamp(),
+  })
+  return ref.id
+}
+
+export async function listInviteCodes(buildingId: string, roomId: string): Promise<InviteCode[]> {
+  const snap = await getDocs(
+    query(
+      collection(db, 'buildings', buildingId, 'rooms', roomId, 'inviteCodes'),
+      orderBy('createdAt', 'desc')
+    )
+  )
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as InviteCode)
+}
+
+export async function deleteInviteCode(
+  buildingId: string,
+  roomId: string,
+  codeId: string
+): Promise<void> {
+  await deleteDoc(doc(db, 'buildings', buildingId, 'rooms', roomId, 'inviteCodes', codeId))
+}
+
+/**
+ * Look up an invite code across all rooms in a building using collectionGroup.
+ * Returns { code doc, roomId } or null.
+ */
+export async function findInviteCode(
+  buildingId: string,
+  rawCode: string
+): Promise<{ inviteCode: InviteCode; roomId: string } | null> {
+  const code = rawCode.toUpperCase()
+  const q = query(
+    collectionGroup(db, 'inviteCodes'),
+    where('buildingId', '==', buildingId),
+    where('code', '==', code),
+    where('redeemed', '==', false)
+  )
+  const snap = await getDocs(q)
+  if (snap.empty) return null
+  const d = snap.docs[0]
+  const data = d.data() as Omit<InviteCode, 'id'>
+
+  // Check expiry
+  if (data.expiresAt && data.expiresAt.toMillis() < Date.now()) return null
+
+  return { inviteCode: { id: d.id, ...data }, roomId: data.roomId }
+}
+
+export async function redeemInviteCode(
+  buildingId: string,
+  roomId: string,
+  codeId: string,
+  deviceId: string
+): Promise<void> {
+  await updateDoc(
+    doc(db, 'buildings', buildingId, 'rooms', roomId, 'inviteCodes', codeId),
+    {
+      redeemed: true,
+      redeemedAt: serverTimestamp(),
+      redeemedByDeviceId: deviceId,
+    }
+  )
 }
 
 // ── Devices ────────────────────────────────────────────────────────────────
@@ -144,19 +207,57 @@ export async function registerDevice(
   buildingId: string,
   roomId: string,
   fcmToken: string,
-  platform: Device['platform']
+  platform: Device['platform'],
+  role: UserRole,
+  userId: string,
+  codeId: string,
+  permissions: InviteCodePermissions
 ): Promise<string> {
-  // Upsert by token so re-registration is idempotent
+  // Upsert by fcmToken
   const q = query(
     collection(db, 'buildings', buildingId, 'rooms', roomId, 'devices'),
     where('fcmToken', '==', fcmToken)
   )
   const snap = await getDocs(q)
-  if (!snap.empty) return snap.docs[0].id
+  if (!snap.empty) {
+    // Update existing
+    await updateDoc(snap.docs[0].ref, { fcmToken, platform, role, userId, codeId, permissions })
+    return snap.docs[0].id
+  }
 
   const ref = doc(collection(db, 'buildings', buildingId, 'rooms', roomId, 'devices'))
-  await setDoc(ref, { fcmToken, platform, registeredAt: serverTimestamp() })
+  await setDoc(ref, {
+    fcmToken, platform, role, userId, codeId, permissions,
+    registeredAt: serverTimestamp(),
+  })
   return ref.id
+}
+
+export async function listDevices(buildingId: string, roomId: string): Promise<Device[]> {
+  const snap = await getDocs(
+    collection(db, 'buildings', buildingId, 'rooms', roomId, 'devices')
+  )
+  return snap.docs.map((d) => ({ id: d.id, roomId, buildingId, ...d.data() }) as Device)
+}
+
+export async function removeDevice(
+  buildingId: string,
+  roomId: string,
+  deviceId: string
+): Promise<void> {
+  await deleteDoc(doc(db, 'buildings', buildingId, 'rooms', roomId, 'devices', deviceId))
+}
+
+export async function updateDeviceFCMToken(
+  buildingId: string,
+  roomId: string,
+  deviceId: string,
+  fcmToken: string
+): Promise<void> {
+  await updateDoc(
+    doc(db, 'buildings', buildingId, 'rooms', roomId, 'devices', deviceId),
+    { fcmToken }
+  )
 }
 
 // ── Arrivals ───────────────────────────────────────────────────────────────
@@ -172,16 +273,9 @@ export async function createArrival(
   const expiresAt = Timestamp.fromMillis(now.toMillis() + 30 * 60 * 1000)
   const ref = doc(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'))
   await setDoc(ref, {
-    buildingId,
-    roomId,
-    roomNumber,
-    type,
-    waitTime,
-    status: 'pending',
-    response: null,
-    reminderCount: 0,
-    createdAt: now,
-    expiresAt,
+    buildingId, roomId, roomNumber, type, waitTime,
+    status: 'pending', response: null, reminderCount: 0,
+    createdAt: now, expiresAt,
   })
   return ref.id
 }

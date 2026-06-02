@@ -7,38 +7,80 @@ import { toast } from 'sonner'
 import {
   Bell, CheckCircle2, AlertTriangle, Share, PlusSquare, Smartphone,
   BellRing, Volume2, Settings, Package, Utensils, Users,
-  ArrowDownToLine, XCircle, Clock,
+  ArrowDownToLine, XCircle, Clock, Crown, Plus, Trash2, KeyRound,
+  Home, LogOut, Copy, Calendar,
 } from 'lucide-react'
+import { getAuth } from 'firebase/auth'
+import { collection, query, where, onSnapshot } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { getRoom, getBuilding, registerDevice, updateInstructions, respondToArrival } from '@/lib/firestore'
+import { Switch } from '@/components/ui/switch'
 import {
-  collection, query, where, onSnapshot,
-} from 'firebase/firestore'
-import { db } from '@/lib/firebase'
+  getRoom, getBuilding,
+  registerDevice, updateInstructions, respondToArrival,
+  createInviteCode, listInviteCodes, deleteInviteCode,
+  listDevices, removeDevice,
+} from '@/lib/firestore'
 import {
-  requestNotificationPermission,
-  getFCMToken,
-  sendTestNotification,
-  isIOS,
-  isInstalledPWA,
-  detectPlatform,
+  requestNotificationPermission, getFCMToken, sendTestNotification,
+  isIOS, isInstalledPWA, detectPlatform,
 } from '@/lib/fcm'
-import type { Room, DeliveryInstructions, Arrival, ResidentResponse } from '@/lib/types'
+import { getSavedRooms, getSavedRoom, removeSavedRoom } from '@/lib/storage'
+import type {
+  Room, Device, InviteCode, Arrival, ResidentResponse, ArrivalType,
+  DeliveryInstructions,
+} from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { Timestamp } from 'firebase/firestore'
 
-// ── Setup Wizard ────────────────────────────────────────────────────────────
+// ── Multi-room selector ────────────────────────────────────────────────────
+
+function RoomSelector({ currentBuildingId, currentRoomId }: { currentBuildingId: string; currentRoomId: string }) {
+  const navigate = useNavigate()
+  const rooms = getSavedRooms()
+  if (rooms.length <= 1) return null
+
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {rooms.map((r) => {
+        const isCurrent = r.buildingId === currentBuildingId && r.roomId === currentRoomId
+        return (
+          <button
+            key={`${r.buildingId}-${r.roomId}`}
+            type="button"
+            onClick={() => navigate(`/resident?b=${r.buildingId}&r=${r.roomId}`)}
+            className={cn(
+              'flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+              isCurrent
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border hover:bg-muted'
+            )}
+          >
+            {r.role === 'owner' ? <Crown className="h-3 w-3" /> : <Home className="h-3 w-3" />}
+            <span>{r.buildingName}</span>
+            <span className="opacity-60">· {r.roomNumber}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Notification Setup ─────────────────────────────────────────────────────
 
 type SetupStep = 'add_to_home' | 'enable' | 'enabling' | 'test' | 'done' | 'blocked'
 
 function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: string }) {
+  const savedRoom = getSavedRoom(buildingId, roomId)
   const ios = isIOS()
   const installed = isInstalledPWA()
   const [step, setStep] = useState<SetupStep>(() => {
@@ -48,64 +90,56 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
     return 'enable'
   })
   const [testing, setTesting] = useState(false)
-  const [tokenRegistered, setTokenRegistered] = useState(false)
 
-  const steps: SetupStep[] = ios
-    ? ['add_to_home', 'enable', 'test', 'done']
-    : ['enable', 'test', 'done']
+  const steps: SetupStep[] = ios ? ['add_to_home', 'enable', 'test', 'done'] : ['enable', 'test', 'done']
   const stepIndex = steps.indexOf(step)
   const progress = step === 'done' ? 100 : Math.max(0, Math.round((stepIndex / (steps.length - 1)) * 100))
 
-  async function handleEnableNotifications() {
+  async function handleEnable() {
     setStep('enabling')
     const perm = await requestNotificationPermission()
     if (perm === 'granted') {
       const token = await getFCMToken()
-      if (token) {
+      if (token && savedRoom) {
         try {
-          await registerDevice(buildingId, roomId, token, detectPlatform())
-          setTokenRegistered(true)
-          toast.success('Device registered for notifications')
+          const auth = getAuth()
+          const userId = auth.currentUser?.uid ?? 'anonymous'
+          await registerDevice(
+            buildingId, roomId, token, detectPlatform(),
+            savedRoom.role, userId, savedRoom.deviceId,
+            { notify: true, respond: savedRoom.role === 'owner' }
+          )
         } catch (err) {
           console.error('[Setup] registerDevice failed:', err)
-          toast.error(`Device registration failed: ${err instanceof Error ? err.message : String(err)}`)
         }
-      } else {
-        console.warn('[Setup] FCM token was null — SW registration may have failed')
+      } else if (!token) {
         toast.error('Could not get notification token. Check browser console.')
       }
       setStep('test')
     } else if (perm === 'denied') {
       setStep('blocked')
     } else {
-      // dismissed
       setStep('enable')
     }
   }
 
-  async function handleTestNotification() {
+  async function handleTest() {
     setTesting(true)
     const ok = await sendTestNotification()
     setTesting(false)
-    if (ok) {
-      toast.success('Test notification sent! Check your notifications.')
-      setStep('done')
-    } else {
-      toast.error('Test failed. Make sure notifications are enabled in system settings.')
-    }
+    if (ok) { toast.success('Test notification sent!'); setStep('done') }
+    else toast.error('Test failed. Check system notification settings.')
   }
 
   if (step === 'done') {
     return (
-      <Card className="border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950">
+      <Card className="border-green-200 bg-green-50">
         <CardContent className="pt-6">
           <div className="flex items-center gap-3">
             <CheckCircle2 className="h-8 w-8 text-green-600 shrink-0" />
             <div>
-              <p className="font-semibold text-green-800 dark:text-green-200">LobbyPing is ready</p>
-              <p className="text-sm text-green-700 dark:text-green-300">
-                {tokenRegistered ? 'Device registered. Push notifications active.' : 'Notifications enabled.'}
-              </p>
+              <p className="font-semibold text-green-800">LobbyPing is ready</p>
+              <p className="text-sm text-green-700">Push notifications active on this device</p>
             </div>
           </div>
         </CardContent>
@@ -121,14 +155,10 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
             <AlertTriangle className="h-6 w-6 text-destructive shrink-0" />
             <div>
               <p className="font-semibold">Notifications blocked</p>
-              <p className="text-sm text-muted-foreground">
-                Enable notifications in your browser/OS settings, then reload this page.
-              </p>
+              <p className="text-sm text-muted-foreground">Enable notifications in browser/OS settings, then reload.</p>
             </div>
           </div>
-          <Button variant="outline" onClick={() => window.location.reload()} className="w-full">
-            Reload Page
-          </Button>
+          <Button variant="outline" onClick={() => window.location.reload()} className="w-full">Reload Page</Button>
         </CardContent>
       </Card>
     )
@@ -137,96 +167,48 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <BellRing className="h-5 w-5 text-primary" />
-          Notification Setup
-        </CardTitle>
+        <CardTitle className="flex items-center gap-2"><BellRing className="h-5 w-5 text-primary" /> Notification Setup</CardTitle>
         <CardDescription>Required to receive arrival alerts</CardDescription>
         <Progress value={progress} className="h-1.5 mt-2" />
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* iOS: Add to Home Screen */}
         {step === 'add_to_home' && (
           <div className="space-y-4">
-            <Alert>
-              <Smartphone className="h-4 w-4" />
-              <AlertDescription>
-                iOS requires LobbyPing to be installed as an app to receive notifications.
-              </AlertDescription>
-            </Alert>
+            <Alert><Smartphone className="h-4 w-4" /><AlertDescription>iOS requires LobbyPing to be installed as an app to receive notifications.</AlertDescription></Alert>
             <div className="space-y-3">
-              {[
-                { icon: Share, text: 'Tap the Share button in Safari' },
-                { icon: PlusSquare, text: 'Tap "Add to Home Screen"' },
-                { icon: Smartphone, text: 'Open LobbyPing from your Home Screen' },
-              ].map(({ icon: Icon, text }, i) => (
+              {[{ icon: Share, text: 'Tap the Share button in Safari' }, { icon: PlusSquare, text: 'Tap "Add to Home Screen"' }, { icon: Smartphone, text: 'Open LobbyPing from your Home Screen' }].map(({ icon: Icon, text }, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                    {i + 1}
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <Icon className="h-4 w-4 text-muted-foreground" />
-                    <span>{text}</span>
-                  </div>
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">{i + 1}</div>
+                  <div className="flex items-center gap-2 text-sm"><Icon className="h-4 w-4 text-muted-foreground" /><span>{text}</span></div>
                 </div>
               ))}
             </div>
-            <Button onClick={() => setStep('enable')} className="w-full">
-              {installed ? "I've opened from Home Screen" : "I've added to Home Screen"}
-            </Button>
+            <Button onClick={() => setStep('enable')} className="w-full">{installed ? "I've opened from Home Screen" : "I've added to Home Screen"}</Button>
           </div>
         )}
-
-        {/* Enable notifications */}
         {(step === 'enable' || step === 'enabling') && (
           <div className="space-y-4">
             <div className="flex items-start gap-3">
               <Bell className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="font-medium text-sm">Allow Notifications</p>
-                <p className="text-sm text-muted-foreground">
-                  Tap the button below and allow notifications when the browser prompts you.
-                </p>
-              </div>
+              <div><p className="font-medium text-sm">Allow Notifications</p><p className="text-sm text-muted-foreground">Tap below and allow notifications when prompted.</p></div>
             </div>
-            <Button
-              onClick={handleEnableNotifications}
-              disabled={step === 'enabling'}
-              className="w-full"
-            >
-              {step === 'enabling' ? 'Requesting permission…' : 'Enable Notifications'}
+            <Button onClick={handleEnable} disabled={step === 'enabling'} className="w-full">
+              {step === 'enabling' ? 'Requesting…' : 'Enable Notifications'}
             </Button>
           </div>
         )}
-
-        {/* Test notification */}
         {step === 'test' && (
           <div className="space-y-4">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-medium text-sm text-green-700">Notifications enabled!</p>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  Now send a test to verify sound and delivery.
-                </p>
-              </div>
+              <div><p className="font-medium text-sm text-green-700">Notifications enabled!</p><p className="text-sm text-muted-foreground mt-0.5">Send a test to verify sound and delivery.</p></div>
             </div>
             <div className="rounded-md bg-muted p-3 space-y-2">
-              <div className="flex items-center gap-2 text-sm">
-                <Volume2 className="h-4 w-4 text-muted-foreground" />
-                <span>Make sure sound is enabled</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <Settings className="h-4 w-4 text-muted-foreground" />
-                <span>Check Focus Mode is not blocking alerts</span>
-              </div>
+              <div className="flex items-center gap-2 text-sm"><Volume2 className="h-4 w-4 text-muted-foreground" /><span>Make sure sound is enabled</span></div>
+              <div className="flex items-center gap-2 text-sm"><Settings className="h-4 w-4 text-muted-foreground" /><span>Check Focus Mode is not blocking alerts</span></div>
             </div>
-            <Button onClick={handleTestNotification} disabled={testing} className="w-full">
-              {testing ? 'Sending…' : 'Send Test Notification'}
-            </Button>
-            <Button variant="ghost" onClick={() => setStep('done')} className="w-full text-muted-foreground">
-              Skip test
-            </Button>
+            <Button onClick={handleTest} disabled={testing} className="w-full">{testing ? 'Sending…' : 'Send Test Notification'}</Button>
+            <Button variant="ghost" onClick={() => setStep('done')} className="w-full text-muted-foreground">Skip test</Button>
           </div>
         )}
       </CardContent>
@@ -234,51 +216,27 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
   )
 }
 
-// ── Active Arrivals ─────────────────────────────────────────────────────────
+// ── Active Arrivals ────────────────────────────────────────────────────────
 
-const ARRIVAL_TYPE_LABELS: Record<string, string> = {
-  package: 'Package',
-  food: 'Food Delivery',
-  guest: 'Guest',
-  other: 'Other',
-}
-
-const WAIT_LABELS: Record<string, string> = {
-  '1min': '1 min',
-  '2min': '2 min',
-  '5min': '5 min',
-}
-
-const RESPONSE_OPTIONS: {
-  value: ResidentResponse
-  label: string
-  icon: React.FC<{ className?: string }>
-  color: string
-}[] = [
+const TYPE_LABELS: Record<ArrivalType, string> = { package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Other' }
+const WAIT_LABELS: Record<string, string> = { '1min': '1 min', '2min': '2 min', '5min': '5 min' }
+const RESPONSE_OPTIONS: { value: ResidentResponse; label: string; icon: React.FC<{className?: string}>; color: string }[] = [
   { value: 'coming_down', label: 'Coming Down', icon: ArrowDownToLine, color: 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100' },
   { value: 'leave_in_lobby', label: 'Leave in Lobby', icon: CheckCircle2, color: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' },
   { value: 'no_need_to_wait', label: 'No Need to Wait', icon: XCircle, color: 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100' },
 ]
 
-function ArrivalCard({
-  arrival,
-  buildingId,
-  roomId,
-}: {
-  arrival: Arrival
-  buildingId: string
-  roomId: string
-}) {
+function ArrivalCard({ arrival, buildingId, roomId, canRespond }: { arrival: Arrival; buildingId: string; roomId: string; canRespond: boolean }) {
   const [responding, setResponding] = useState(false)
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponded = arrival.status === 'responded'
 
   async function handleResponse(response: ResidentResponse) {
-    if (responding) return
+    if (responding || !canRespond) return
     setResponding(true)
     try {
       await respondToArrival(buildingId, roomId, arrival.id, response)
-      toast.success('Response sent to visitor')
+      toast.success('Response sent')
     } catch (err) {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`)
       setResponding(false)
@@ -286,80 +244,52 @@ function ArrivalCard({
   }
 
   return (
-    <Card className={cn(
-      'border-2',
-      isExpired ? 'opacity-50' : hasResponded ? 'border-green-200' : 'border-primary/30 shadow-md'
-    )}>
+    <Card className={cn('border-2', isExpired ? 'opacity-50' : hasResponded ? 'border-green-200' : 'border-primary/30 shadow-md')}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <CardTitle className="text-base">
-              {ARRIVAL_TYPE_LABELS[arrival.type] ?? arrival.type}
-            </CardTitle>
-            {!hasResponded && !isExpired && (
-              <Badge variant="default" className="text-xs animate-pulse">
-                Waiting
-              </Badge>
-            )}
+            <CardTitle className="text-base">{TYPE_LABELS[arrival.type] ?? arrival.type}</CardTitle>
+            {!hasResponded && !isExpired && <Badge variant="default" className="text-xs animate-pulse">Waiting</Badge>}
             {hasResponded && <Badge variant="secondary" className="text-xs">Responded</Badge>}
             {isExpired && <Badge variant="outline" className="text-xs">Expired</Badge>}
           </div>
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock className="h-3 w-3" />
-            {WAIT_LABELS[arrival.waitTime] ?? arrival.waitTime}
-            {arrival.reminderCount > 0 && (
-              <span className="ml-1 text-orange-500">· {arrival.reminderCount} reminder{arrival.reminderCount > 1 ? 's' : ''}</span>
-            )}
+            <Clock className="h-3 w-3" />{WAIT_LABELS[arrival.waitTime] ?? arrival.waitTime}
+            {arrival.reminderCount > 0 && <span className="ml-1 text-orange-500">· {arrival.reminderCount}×</span>}
           </div>
         </div>
       </CardHeader>
       <CardContent>
         {hasResponded ? (
-          <p className="text-sm text-muted-foreground">
-            You responded: <span className="font-medium text-foreground">
-              {RESPONSE_OPTIONS.find(r => r.value === arrival.response)?.label ?? arrival.response}
-            </span>
-          </p>
+          <p className="text-sm text-muted-foreground">Responded: <span className="font-medium text-foreground">{RESPONSE_OPTIONS.find(r => r.value === arrival.response)?.label}</span></p>
         ) : isExpired ? (
           <p className="text-sm text-muted-foreground">Visitor left without a response.</p>
-        ) : (
+        ) : canRespond ? (
           <div className="space-y-2">
             {RESPONSE_OPTIONS.map(({ value, label, icon: Icon, color }) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => handleResponse(value)}
-                disabled={responding}
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-50',
-                  color
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                <span className="font-medium text-sm">{label}</span>
+              <button key={value} type="button" onClick={() => handleResponse(value)} disabled={responding}
+                className={cn('flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-50', color)}>
+                <Icon className="h-4 w-4 shrink-0" /><span className="font-medium text-sm">{label}</span>
               </button>
             ))}
           </div>
+        ) : (
+          <p className="text-sm text-muted-foreground italic">You don't have permission to respond.</p>
         )}
       </CardContent>
     </Card>
   )
 }
 
-function ActiveArrivals({ buildingId, roomId }: { buildingId: string; roomId: string }) {
+function ActiveArrivals({ buildingId, roomId, canRespond }: { buildingId: string; roomId: string; canRespond: boolean }) {
   const [arrivals, setArrivals] = useState<Arrival[]>([])
 
   useEffect(() => {
     if (!buildingId || !roomId) return
-    const arrivalsRef = collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals')
-    const q = query(arrivalsRef, where('status', 'in', ['pending', 'responded']))
-    const unsub = onSnapshot(q, (snap) => {
-      const docs = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }) as Arrival)
-        .sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis())
-      setArrivals(docs)
+    const q = query(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'), where('status', 'in', ['pending', 'responded']))
+    return onSnapshot(q, (snap) => {
+      setArrivals(snap.docs.map(d => ({ id: d.id, ...d.data() }) as Arrival).sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis()))
     })
-    return unsub
   }, [buildingId, roomId])
 
   if (arrivals.length === 0) {
@@ -371,45 +301,17 @@ function ActiveArrivals({ buildingId, roomId }: { buildingId: string; roomId: st
       </div>
     )
   }
-
-  return (
-    <div className="space-y-3">
-      {arrivals.map(arrival => (
-        <ArrivalCard
-          key={arrival.id}
-          arrival={arrival}
-          buildingId={buildingId}
-          roomId={roomId}
-        />
-      ))}
-    </div>
-  )
+  return <div className="space-y-3">{arrivals.map(a => <ArrivalCard key={a.id} arrival={a} buildingId={buildingId} roomId={roomId} canRespond={canRespond} />)}</div>
 }
 
-// ── Delivery Instructions ───────────────────────────────────────────────────
+// ── Delivery Instructions ──────────────────────────────────────────────────
 
-const instructionsSchema = z.object({
-  package: z.string().max(300),
-  food: z.string().max(300),
-  guest: z.string().max(300),
-})
-
+const instructionsSchema = z.object({ package: z.string().max(300), food: z.string().max(300), guest: z.string().max(300) })
 type InstructionsForm = z.infer<typeof instructionsSchema>
 
-function DeliveryInstructionsForm({
-  buildingId,
-  roomId,
-  initial,
-}: {
-  buildingId: string
-  roomId: string
-  initial: DeliveryInstructions
-}) {
+function DeliveryInstructionsForm({ buildingId, roomId, initial }: { buildingId: string; roomId: string; initial: DeliveryInstructions }) {
   const [saving, setSaving] = useState(false)
-  const { register, handleSubmit, formState: { isDirty } } = useForm<InstructionsForm>({
-    resolver: zodResolver(instructionsSchema),
-    defaultValues: initial,
-  })
+  const { register, handleSubmit, formState: { isDirty } } = useForm<InstructionsForm>({ resolver: zodResolver(instructionsSchema), defaultValues: initial })
 
   async function onSubmit(data: InstructionsForm) {
     setSaving(true)
@@ -418,51 +320,183 @@ function DeliveryInstructionsForm({
       toast.success('Instructions saved')
     } catch (err) {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
   }
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div className="space-y-2">
-        <Label className="flex items-center gap-2">
-          <Package className="h-4 w-4" /> Package instructions
-        </Label>
-        <Textarea
-          placeholder="e.g. Leave inside parcel locker in lobby"
-          rows={2}
-          {...register('package')}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label className="flex items-center gap-2">
-          <Utensils className="h-4 w-4" /> Food delivery instructions
-        </Label>
-        <Textarea
-          placeholder="e.g. Please wait 2 minutes. Leave at front desk if no answer."
-          rows={2}
-          {...register('food')}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label className="flex items-center gap-2">
-          <Users className="h-4 w-4" /> Guest instructions
-        </Label>
-        <Textarea
-          placeholder="e.g. Resident will come downstairs to meet you."
-          rows={2}
-          {...register('guest')}
-        />
-      </div>
-      <Button type="submit" disabled={saving || !isDirty} className="w-full">
-        {saving ? 'Saving…' : 'Save Instructions'}
-      </Button>
+      <div className="space-y-2"><Label className="flex items-center gap-2"><Package className="h-4 w-4" /> Package</Label><Textarea placeholder="e.g. Leave inside parcel locker in lobby" rows={2} {...register('package')} /></div>
+      <div className="space-y-2"><Label className="flex items-center gap-2"><Utensils className="h-4 w-4" /> Food Delivery</Label><Textarea placeholder="e.g. Please wait 2 minutes. Leave at front desk if no answer." rows={2} {...register('food')} /></div>
+      <div className="space-y-2"><Label className="flex items-center gap-2"><Users className="h-4 w-4" /> Guest</Label><Textarea placeholder="e.g. Resident will come downstairs." rows={2} {...register('guest')} /></div>
+      <Button type="submit" disabled={saving || !isDirty} className="w-full">{saving ? 'Saving…' : 'Save Instructions'}</Button>
     </form>
   )
 }
 
-// ── Main Page ───────────────────────────────────────────────────────────────
+// ── Owner: Manage Members ──────────────────────────────────────────────────
+
+const memberCodeSchema = z.object({
+  expiryDays: z.string().optional(),
+  canRespond: z.boolean().default(false),
+})
+type MemberCodeForm = z.infer<typeof memberCodeSchema>
+
+function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: string; roomId: string; ownerDeviceId: string }) {
+  const [codes, setCodes] = useState<InviteCode[]>([])
+  const [devices, setDevices] = useState<Device[]>([])
+  const [creatingCode, setCreatingCode] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const { register, handleSubmit, watch, setValue, reset } = useForm<MemberCodeForm>({ defaultValues: { canRespond: false } })
+  const canRespond = watch('canRespond')
+
+  useEffect(() => {
+    Promise.all([
+      listInviteCodes(buildingId, roomId),
+      listDevices(buildingId, roomId),
+    ]).then(([c, d]) => { setCodes(c); setDevices(d) })
+  }, [buildingId, roomId])
+
+  async function onCreateCode(data: MemberCodeForm) {
+    setCreatingCode(true)
+    const code = generateCode()
+    let expiresAt: Timestamp | null = null
+    if (data.expiryDays && parseInt(data.expiryDays) > 0) {
+      expiresAt = Timestamp.fromMillis(Date.now() + parseInt(data.expiryDays) * 86400_000)
+    }
+    try {
+      await createInviteCode(buildingId, roomId, code, 'member', ownerDeviceId, {
+        expiresAt,
+        permissions: { notify: true, respond: data.canRespond },
+      })
+      const updated = await listInviteCodes(buildingId, roomId)
+      setCodes(updated)
+      toast.success(`Member code created: ${code}`)
+      reset()
+      setShowForm(false)
+    } catch (err) {
+      toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally { setCreatingCode(false) }
+  }
+
+  async function handleDeleteCode(codeId: string) {
+    await deleteInviteCode(buildingId, roomId, codeId)
+    setCodes((prev) => prev.filter((c) => c.id !== codeId))
+    toast.success('Code deleted')
+  }
+
+  async function handleRemoveDevice(deviceId: string) {
+    if (!confirm('Remove this device from the room?')) return
+    await removeDevice(buildingId, roomId, deviceId)
+    setDevices((prev) => prev.filter((d) => d.id !== deviceId))
+    toast.success('Device removed')
+  }
+
+  function copyCode(code: string) {
+    const url = `${window.location.origin}${window.location.pathname}#/join?b=${buildingId}&code=${code}`
+    navigator.clipboard.writeText(url)
+    toast.success('Invite link copied')
+  }
+
+  const memberCodes = codes.filter((c) => c.role === 'member')
+  const memberDevices = devices.filter((d) => d.role === 'member')
+
+  return (
+    <div className="space-y-5">
+      {/* Create member code */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-medium text-sm">Member Invite Codes</h3>
+          <Button size="sm" variant="outline" onClick={() => setShowForm(!showForm)}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Create Code
+          </Button>
+        </div>
+
+        {showForm && (
+          <Card className="mb-3">
+            <CardContent className="pt-4 space-y-3">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2"><Calendar className="h-4 w-4" /> Expiry (days, blank = never)</Label>
+                <Input type="number" placeholder="e.g. 7" min="1" max="365" {...register('expiryDays')} />
+              </div>
+              <div className="flex items-center gap-3">
+                <Switch checked={canRespond} onCheckedChange={(v) => setValue('canRespond', v)} id="canRespond" />
+                <Label htmlFor="canRespond" className="cursor-pointer">Allow member to respond to arrivals</Label>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={handleSubmit(onCreateCode)} disabled={creatingCode} className="flex-1">
+                  {creatingCode ? 'Creating…' : 'Generate Code'}
+                </Button>
+                <Button variant="ghost" onClick={() => setShowForm(false)}>Cancel</Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {memberCodes.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No member codes yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {memberCodes.map((ic) => (
+              <div key={ic.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="font-mono text-sm tracking-wider">{ic.code}</span>
+                  </div>
+                  {ic.redeemed ? <Badge variant="outline" className="text-xs text-green-600 border-green-300">Used</Badge>
+                    : ic.expiresAt && ic.expiresAt.toMillis() < Date.now() ? <Badge variant="destructive" className="text-xs">Expired</Badge>
+                    : <Badge variant="outline" className="text-xs">Available</Badge>}
+                  {ic.permissions.respond && <Badge variant="secondary" className="text-xs">Can Respond</Badge>}
+                  {ic.expiresAt && <span className="text-xs text-muted-foreground">Exp: {new Date(ic.expiresAt.toMillis()).toLocaleDateString()}</span>}
+                </div>
+                <div className="flex items-center gap-1">
+                  {!ic.redeemed && <Button variant="ghost" size="icon" onClick={() => copyCode(ic.code)}><Copy className="h-3.5 w-3.5" /></Button>}
+                  <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteCode(ic.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <Separator />
+
+      {/* Member devices */}
+      <div>
+        <h3 className="font-medium text-sm mb-3">Member Devices ({memberDevices.length})</h3>
+        {memberDevices.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No members have joined yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {memberDevices.map((d) => (
+              <div key={d.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-sm font-medium capitalize">{d.platform}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {d.permissions.respond ? 'Can respond' : 'Notifications only'}
+                    </p>
+                  </div>
+                </div>
+                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleRemoveDevice(d.id)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function generateCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+}
+
+// ── Main Page ──────────────────────────────────────────────────────────────
 
 export default function ResidentPage() {
   const [searchParams] = useSearchParams()
@@ -473,74 +507,82 @@ export default function ResidentPage() {
   const [buildingName, setBuildingName] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
+  const savedRoom = getSavedRoom(buildingId, roomId)
+  const isOwner = savedRoom?.role === 'owner'
+  const canRespond = savedRoom ? (isOwner || savedRoom.role === 'member') : false
+  // Fine-grained: check permissions from localStorage? For simplicity trust role.
+
   useEffect(() => {
     if (!buildingId || !roomId) { setLoading(false); return }
-    Promise.all([
-      getRoom(buildingId, roomId),
-      getBuilding(buildingId),
-    ]).then(([r, b]) => {
-      setRoom(r)
-      if (b) setBuildingName(b.name)
-      setLoading(false)
+    Promise.all([getRoom(buildingId, roomId), getBuilding(buildingId)]).then(([r, b]) => {
+      setRoom(r); if (b) setBuildingName(b.name); setLoading(false)
     })
   }, [buildingId, roomId])
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-muted-foreground text-sm">Loading…</div>
-      </div>
-    )
+  function handleLeave() {
+    if (!confirm('Leave this room? You will need a new invite code to rejoin.')) return
+    removeSavedRoom(buildingId, roomId)
+    const remaining = getSavedRooms()
+    if (remaining.length > 0) navigate(`/resident?b=${remaining[0].buildingId}&r=${remaining[0].roomId}`)
+    else navigate('/join')
   }
+
+  if (loading) return <div className="flex min-h-screen items-center justify-center"><div className="text-muted-foreground text-sm">Loading…</div></div>
 
   if (!room) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center p-4">
         <Alert variant="destructive" className="max-w-md">
           <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>
-            Room not found. Check your link or invite code.{' '}
-            <button
-              className="underline"
-              onClick={() => navigate('/join')}
-            >
-              Register again
-            </button>
-          </AlertDescription>
+          <AlertDescription>Room not found. <button className="underline" onClick={() => navigate('/join')}>Register again</button></AlertDescription>
         </Alert>
       </div>
     )
   }
 
+  const tabCount = isOwner ? 4 : 3
+
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-md p-4 space-y-4">
         {/* Header */}
-        <div className="pt-4 pb-2">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-              <Bell className="h-5 w-5 text-primary" />
+        <div className="pt-4 pb-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+                {isOwner ? <Crown className="h-5 w-5 text-primary" /> : <Bell className="h-5 w-5 text-primary" />}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-bold">LobbyPing</h1>
+                  {isOwner && <Badge variant="default" className="text-xs">Owner</Badge>}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {buildingName ? `${buildingName} · ` : ''}Room {room.number}
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold">LobbyPing</h1>
-              <p className="text-sm text-muted-foreground">
-                {buildingName ? `${buildingName} · ` : ''}Room {room.number}
-              </p>
-            </div>
+            <Button variant="ghost" size="icon" title="Leave room" onClick={handleLeave}>
+              <LogOut className="h-4 w-4 text-muted-foreground" />
+            </Button>
           </div>
         </div>
+
+        {/* Multi-room selector */}
+        <RoomSelector currentBuildingId={buildingId} currentRoomId={roomId} />
 
         <Separator />
 
         <Tabs defaultValue="arrivals">
-          <TabsList className="w-full">
-            <TabsTrigger value="arrivals" className="flex-1">Arrivals</TabsTrigger>
-            <TabsTrigger value="notifications" className="flex-1">Notifications</TabsTrigger>
-            <TabsTrigger value="instructions" className="flex-1">Instructions</TabsTrigger>
+          <TabsList className={cn('w-full', tabCount === 4 ? 'grid grid-cols-4' : 'grid grid-cols-3')}>
+            <TabsTrigger value="arrivals">Arrivals</TabsTrigger>
+            <TabsTrigger value="notifications">Alerts</TabsTrigger>
+            <TabsTrigger value="instructions">Notes</TabsTrigger>
+            {isOwner && <TabsTrigger value="members"><Crown className="h-3.5 w-3.5 mr-1" />Members</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="arrivals" className="mt-4">
-            <ActiveArrivals buildingId={buildingId} roomId={roomId} />
+            <ActiveArrivals buildingId={buildingId} roomId={roomId} canRespond={canRespond} />
           </TabsContent>
 
           <TabsContent value="notifications" className="mt-4">
@@ -551,19 +593,27 @@ export default function ResidentPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Delivery Instructions</CardTitle>
-                <CardDescription>
-                  Shown to visitors when you don't respond
-                </CardDescription>
+                <CardDescription>Shown to visitors when you don't respond</CardDescription>
               </CardHeader>
               <CardContent>
-                <DeliveryInstructionsForm
-                  buildingId={buildingId}
-                  roomId={roomId}
-                  initial={room.instructions}
-                />
+                <DeliveryInstructionsForm buildingId={buildingId} roomId={roomId} initial={room.instructions} />
               </CardContent>
             </Card>
           </TabsContent>
+
+          {isOwner && savedRoom && (
+            <TabsContent value="members" className="mt-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2"><Users className="h-4 w-4" /> Manage Members</CardTitle>
+                  <CardDescription>Create invite codes for family or roommates. Control their permissions.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <MembersPanel buildingId={buildingId} roomId={roomId} ownerDeviceId={savedRoom.deviceId} />
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </div>

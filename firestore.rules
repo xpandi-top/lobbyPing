@@ -2,62 +2,97 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Buildings: read by all, create/update/delete by authenticated users
+    // Buildings: read by all, write by authenticated users
     match /buildings/{buildingId} {
       allow read: if true;
       allow create, update, delete: if request.auth != null;
 
-      // Rooms: read by all, create/update/delete by authenticated users
+      // Rooms
       match /rooms/{roomId} {
         allow read: if true;
         allow create, update, delete: if request.auth != null;
 
-        // Devices: create by authenticated users, no read (privacy), delete by auth (admin cleanup)
+        // Invite Codes
+        match /inviteCodes/{codeId} {
+          // Read: any auth user (needed for redemption lookup + listing)
+          allow read: if request.auth != null;
+
+          // Create: auth users (admin creates owner codes, owner creates member codes)
+          allow create: if request.auth != null &&
+            request.resource.data.keys().hasAll([
+              'code','buildingId','roomId','role','redeemed','redeemedAt',
+              'redeemedByDeviceId','createdBy','expiresAt','permissions','createdAt'
+            ]) &&
+            request.resource.data.redeemed == false &&
+            request.resource.data.role in ['owner','member'];
+
+          // Update: only to mark as redeemed (set redeemed=true, redeemedAt, redeemedByDeviceId)
+          allow update: if request.auth != null &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['redeemed','redeemedAt','redeemedByDeviceId']) &&
+            request.resource.data.redeemed == true &&
+            resource.data.redeemed == false;
+
+          // Delete: auth users (admin/owner housekeeping)
+          allow delete: if request.auth != null;
+        }
+
+        // Devices: create/update by auth, no public read
         match /devices/{deviceId} {
-          allow read: if false;
+          allow read: if request.auth != null;
           allow create: if request.auth != null;
-          allow update: if false;
+          allow update: if request.auth != null;
           allow delete: if request.auth != null;
         }
 
         // Arrivals
         match /arrivals/{arrivalId} {
-          // Visitors can create arrivals (must be authenticated)
+          allow read: if true;
+
           allow create: if
             request.auth != null &&
-            request.resource.data.keys().hasAll(['buildingId','roomId','roomNumber','type','waitTime','status','response','reminderCount','createdAt','expiresAt']) &&
+            request.resource.data.keys().hasAll([
+              'buildingId','roomId','roomNumber','type','waitTime',
+              'status','response','reminderCount','createdAt','expiresAt'
+            ]) &&
             request.resource.data.status == 'pending' &&
             request.resource.data.response == null &&
             request.resource.data.reminderCount == 0 &&
             request.resource.data.type in ['package','food','guest','other'] &&
             request.resource.data.waitTime in ['1min','2min','5min'];
 
-          // Read allowed for polling status
-          allow read: if true;
-
-          // Update: visitor can increment reminderCount (max 3), resident can set response
           allow update: if
             request.auth != null &&
             (
-              // Visitor sending a reminder
+              // Reminder increment (visitor)
               (
                 request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reminderCount']) &&
                 request.resource.data.reminderCount <= 3 &&
                 request.resource.data.reminderCount == resource.data.reminderCount + 1 &&
                 resource.data.status == 'pending'
               ) ||
-              // Resident responding
+              // Response (resident)
               (
                 request.resource.data.diff(resource.data).affectedKeys().hasOnly(['response','status']) &&
                 request.resource.data.response in ['coming_down','leave_in_lobby','no_need_to_wait'] &&
                 request.resource.data.status == 'responded' &&
                 resource.data.status == 'pending'
+              ) ||
+              // Expire (Cloud Function)
+              (
+                request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                request.resource.data.status == 'expired'
               )
             );
 
           allow delete: if request.auth != null;
         }
       }
+    }
+
+    // CollectionGroup rule for invite code lookup across all rooms
+    match /{path=**}/inviteCodes/{codeId} {
+      allow read: if request.auth != null;
     }
   }
 }
