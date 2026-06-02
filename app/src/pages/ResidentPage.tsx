@@ -369,7 +369,8 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
   const [codes, setCodes] = useState<InviteCode[]>([])
   const [devices, setDevices] = useState<Device[]>([])
   const [creatingCode, setCreatingCode] = useState(false)
-  const [showForm, setShowForm] = useState(false)
+  const [transferCode, setTransferCode] = useState<string | null>(null)
+  const [showMemberForm, setShowMemberForm] = useState(false)
   const { register, handleSubmit, watch, setValue, reset } = useForm<MemberCodeForm>({ defaultValues: { canRespond: false } })
   const canRespond = watch('canRespond')
 
@@ -394,12 +395,31 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
       })
       const updated = await listInviteCodes(buildingId, roomId)
       setCodes(updated)
-      toast.success(`Member code created: ${code}`)
+      toast.success(`Member code: ${code}`)
       reset()
-      setShowForm(false)
+      setShowMemberForm(false)
     } catch (err) {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`)
     } finally { setCreatingCode(false) }
+  }
+
+  async function handleCreateTransferCode() {
+    const code = generateCode()
+    const expiresAt = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000) // 24h
+    try {
+      await createInviteCode(buildingId, roomId, code, 'owner', ownerDeviceId, {
+        expiresAt,
+        permissions: { notify: true, respond: true },
+      })
+      const updated = await listInviteCodes(buildingId, roomId)
+      setCodes(updated)
+      setTransferCode(code)
+      const url = `${window.location.origin}${window.location.pathname}#/join?b=${buildingId}&code=${code}`
+      navigator.clipboard.writeText(url)
+      toast.success('Transfer link copied to clipboard')
+    } catch (err) {
+      toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   async function handleDeleteCode(codeId: string) {
@@ -408,10 +428,15 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
     toast.success('Code deleted')
   }
 
-  async function handleRemoveDevice(deviceId: string) {
-    if (!confirm('Remove this device from the room?')) return
-    await removeDevice(buildingId, roomId, deviceId)
-    setDevices((prev) => prev.filter((d) => d.id !== deviceId))
+  async function handleRemoveDevice(device: Device) {
+    const isCurrent = device.id === ownerDeviceId
+    const label = device.name || device.platform
+    const msg = isCurrent
+      ? `Remove THIS device (${label})? You will be logged out of this room.`
+      : `Remove ${label}?`
+    if (!confirm(msg)) return
+    await removeDevice(buildingId, roomId, device.id)
+    setDevices((prev) => prev.filter((d) => d.id !== device.id))
     toast.success('Device removed')
   }
 
@@ -422,20 +447,85 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
   }
 
   const memberCodes = codes.filter((c) => c.role === 'member')
-  const memberDevices = devices.filter((d) => d.role === 'member')
 
   return (
     <div className="space-y-5">
+
+      {/* Device Transfer */}
+      <div>
+        <h3 className="font-medium text-sm mb-1">Switch / Transfer Device</h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Moving to a new phone? Generate a 24-hour transfer code, join on new device, then remove old device below.
+        </p>
+        {transferCode ? (
+          <div className="rounded-md bg-muted p-3 space-y-2">
+            <p className="text-xs text-muted-foreground">Transfer code (24h, owner access):</p>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-lg tracking-widest font-bold">{transferCode}</span>
+              <Button variant="ghost" size="icon" onClick={() => {
+                const url = `${window.location.origin}${window.location.pathname}#/join?b=${buildingId}&code=${transferCode}`
+                navigator.clipboard.writeText(url)
+                toast.success('Link copied')
+              }}><Copy className="h-3.5 w-3.5" /></Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Open link on new device, enter your name, register. Then remove old device from the list below.</p>
+            <Button variant="ghost" size="sm" onClick={() => setTransferCode(null)} className="text-muted-foreground">Dismiss</Button>
+          </div>
+        ) : (
+          <Button variant="outline" className="w-full" onClick={handleCreateTransferCode}>
+            <KeyRound className="h-4 w-4 mr-2" /> Generate Transfer Code
+          </Button>
+        )}
+      </div>
+
+      <Separator />
+
+      {/* All devices */}
+      <div>
+        <h3 className="font-medium text-sm mb-3">All Devices ({devices.length})</h3>
+        {devices.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No registered devices.</p>
+        ) : (
+          <div className="space-y-2">
+            {devices.map((d) => {
+              const isCurrent = d.id === ownerDeviceId
+              return (
+                <div key={d.id} className={cn('flex items-center justify-between rounded-md border px-3 py-2', isCurrent && 'border-primary/40 bg-primary/5')}>
+                  <div className="flex items-center gap-2">
+                    {d.role === 'owner' ? <Crown className="h-4 w-4 text-primary shrink-0" /> : <Users className="h-4 w-4 text-muted-foreground shrink-0" />}
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-medium">{d.name || `${d.platform} device`}</p>
+                        {isCurrent && <Badge variant="outline" className="text-xs border-primary/40 text-primary">This device</Badge>}
+                      </div>
+                      <p className="text-xs text-muted-foreground capitalize">
+                        {d.platform} · {d.role} · {d.permissions.respond ? 'can respond' : 'notify only'}
+                      </p>
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
+                    onClick={() => handleRemoveDevice(d)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      <Separator />
+
       {/* Create member code */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-medium text-sm">Member Invite Codes</h3>
-          <Button size="sm" variant="outline" onClick={() => setShowForm(!showForm)}>
+          <Button size="sm" variant="outline" onClick={() => setShowMemberForm(!showMemberForm)}>
             <Plus className="h-3.5 w-3.5 mr-1" /> Create Code
           </Button>
         </div>
 
-        {showForm && (
+        {showMemberForm && (
           <Card className="mb-3">
             <CardContent className="pt-4 space-y-3">
               <div className="space-y-2">
@@ -450,7 +540,7 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
                 <Button onClick={handleSubmit(onCreateCode)} disabled={creatingCode} className="flex-1">
                   {creatingCode ? 'Creating…' : 'Generate Code'}
                 </Button>
-                <Button variant="ghost" onClick={() => setShowForm(false)}>Cancel</Button>
+                <Button variant="ghost" onClick={() => setShowMemberForm(false)}>Cancel</Button>
               </div>
             </CardContent>
           </Card>
@@ -483,34 +573,6 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
         )}
       </div>
 
-      <Separator />
-
-      {/* Member devices */}
-      <div>
-        <h3 className="font-medium text-sm mb-3">Member Devices ({memberDevices.length})</h3>
-        {memberDevices.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No members have joined yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {memberDevices.map((d) => (
-              <div key={d.id} className="flex items-center justify-between rounded-md border px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                  <div>
-                    <p className="text-sm font-medium">{d.name || `${d.platform} device`}</p>
-                    <p className="text-xs text-muted-foreground capitalize">
-                      {d.platform} · {d.permissions.respond ? 'Can respond' : 'Notifications only'}
-                    </p>
-                  </div>
-                </div>
-                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleRemoveDevice(d.id)}>
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   )
 }
