@@ -10,7 +10,6 @@ import {
   ArrowDownToLine, XCircle, Clock, Crown, Plus, Trash2, KeyRound,
   Home, LogOut, Copy, Calendar, MessageCircle,
 } from 'lucide-react'
-import { getAuth } from 'firebase/auth'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
@@ -26,13 +25,13 @@ import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import {
   getRoom, getBuilding,
-  registerDevice, updateInstructions, respondToArrival,
+  updateDeviceFCMToken, updateInstructions, respondToArrival,
   createInviteCode, listInviteCodes, deleteInviteCode,
   listDevices, removeDevice,
 } from '@/lib/firestore'
 import {
   requestNotificationPermission, getFCMToken, sendTestNotification,
-  isIOS, isInstalledPWA, detectPlatform,
+  isIOS, isInstalledPWA,
 } from '@/lib/fcm'
 import {
   getDismissedArrivalIds,
@@ -89,6 +88,7 @@ function RoomSelector({ currentBuildingId, currentRoomId }: { currentBuildingId:
 type SetupStep = 'add_to_home' | 'enable' | 'enabling' | 'test' | 'done' | 'blocked'
 
 function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: string }) {
+  const navigate = useNavigate()
   const savedRoom = getSavedRoom(buildingId, roomId)
   const ios = isIOS()
   const installed = isInstalledPWA()
@@ -106,23 +106,29 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
   const stepIndex = steps.indexOf(step)
   const progress = step === 'done' ? 100 : Math.max(0, Math.round((stepIndex / (steps.length - 1)) * 100))
 
+  useEffect(() => {
+    if (!savedRoom || !notificationSupported || Notification.permission !== 'granted') return
+    getFCMToken()
+      .then((token) => token ? updateDeviceFCMToken(buildingId, roomId, savedRoom.deviceId, token) : undefined)
+      .catch((err) => console.error('[Alerts] refresh token failed:', err))
+  }, [buildingId, notificationSupported, roomId, savedRoom?.deviceId])
+
   async function handleEnable() {
+    if (!savedRoom) {
+      toast.error('Add this home before enabling alerts')
+      navigate('/join')
+      return
+    }
     setStep('enabling')
     const perm = await requestNotificationPermission()
     if (perm === 'granted') {
       const token = await getFCMToken()
       if (token && savedRoom) {
         try {
-          const auth = getAuth()
-          const userId = auth.currentUser?.uid ?? 'anonymous'
-          await registerDevice(
-            buildingId, roomId, token, detectPlatform(),
-            savedRoom.role, userId, savedRoom.deviceId,
-            { notify: true, respond: savedRoom.role === 'owner' },
-            savedRoom.name
-          )
+          await updateDeviceFCMToken(buildingId, roomId, savedRoom.deviceId, token)
         } catch (err) {
-          console.error('[Setup] registerDevice failed:', err)
+          console.error('[Alerts] updateDeviceFCMToken failed:', err)
+          toast.error('Could not save this notification token. Try rejoining with a new code.')
         }
       } else if (!token) {
         toast.error('Could not get notification token. Check browser console.')
@@ -141,6 +147,25 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
     setTesting(false)
     if (ok) { toast.success('Test notification sent!'); setStep('done') }
     else toast.error('Test failed. Check system notification settings.')
+  }
+
+  if (!savedRoom) {
+    return (
+      <Card className="border-primary/30">
+        <CardContent className="pt-6 space-y-3">
+          <div className="flex items-start gap-3">
+            <Home className="h-6 w-6 text-primary shrink-0" />
+            <div>
+              <p className="font-semibold">Add this home first</p>
+              <p className="text-sm text-muted-foreground">
+                Alerts can only be enabled after this browser or installed app is registered with a one-time invite code.
+              </p>
+            </div>
+          </div>
+          <Button onClick={() => navigate('/join')} className="w-full">Add Home</Button>
+        </CardContent>
+      </Card>
+    )
   }
 
   if (step === 'done') {
@@ -183,16 +208,16 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2"><BellRing className="h-5 w-5 text-primary" /> Notification Setup</CardTitle>
-        <CardDescription>Required to receive arrival alerts</CardDescription>
+        <CardTitle className="flex items-center gap-2"><BellRing className="h-5 w-5 text-primary" /> Alerts Setup</CardTitle>
+        <CardDescription>Install, allow notifications, then send a test</CardDescription>
         <Progress value={progress} className="h-1.5 mt-2" />
       </CardHeader>
       <CardContent className="space-y-4">
         {step === 'add_to_home' && (
           <div className="space-y-4">
-            <Alert><Smartphone className="h-4 w-4" /><AlertDescription>iPhone requires the resident app to be installed before notifications can be enabled.</AlertDescription></Alert>
+            <Alert><Smartphone className="h-4 w-4" /><AlertDescription>iPhone requires LobbyPing to be opened from the Home Screen before alerts can be enabled.</AlertDescription></Alert>
             <div className="space-y-3">
-              {[{ icon: Share, text: 'Stay on this resident room page, then tap Share in Safari' }, { icon: PlusSquare, text: 'Tap "Add to Home Screen"' }, { icon: Smartphone, text: 'Open LobbyPing from the Home Screen to finish setup' }].map(({ icon: Icon, text }, i) => (
+              {[{ icon: Share, text: 'In Safari, open /lobbyPing/ and tap Share' }, { icon: PlusSquare, text: 'Tap "Add to Home Screen"' }, { icon: Smartphone, text: 'Open LobbyPing from the Home Screen, choose this home, then return to Alerts' }].map(({ icon: Icon, text }, i) => (
                 <div key={i} className="flex items-center gap-3">
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">{i + 1}</div>
                   <div className="flex items-center gap-2 text-sm"><Icon className="h-4 w-4 text-muted-foreground" /><span>{text}</span></div>
@@ -200,7 +225,7 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
               ))}
             </div>
             {installed ? (
-              <Button onClick={() => setStep('enable')} className="w-full">Continue Notification Setup</Button>
+              <Button onClick={() => setStep('enable')} className="w-full">Continue Alerts Setup</Button>
             ) : (
               <Button variant="outline" onClick={() => window.location.reload()} className="w-full">
                 I opened it from Home Screen
@@ -242,13 +267,13 @@ function NotificationGuide() {
   const ios = isIOS()
   const permission = 'Notification' in window ? Notification.permission : 'denied'
   const installText = ios
-    ? 'From this resident room page in Safari, use Share, Add to Home Screen, then open LobbyPing from the new app icon.'
+    ? 'Install from /lobbyPing/ in Safari, then open LobbyPing from the Home Screen before enabling alerts.'
     : 'Use the browser install option when available, then keep this device signed in.'
 
   const steps = [
     {
       icon: Smartphone,
-      title: ios ? 'Install on Home Screen' : 'Install or keep open',
+      title: ios ? 'Install LobbyPing' : 'Install or keep open',
       body: installText,
     },
     {
@@ -260,7 +285,7 @@ function NotificationGuide() {
     },
     {
       icon: BellRing,
-      title: 'Send a test',
+      title: 'Test alerts',
       body: 'Use Send Test Notification to confirm sound, banners, and Focus settings.',
     },
   ]
@@ -268,8 +293,8 @@ function NotificationGuide() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Setup checklist</CardTitle>
-        <CardDescription>Use this device to receive visitor alerts.</CardDescription>
+        <CardTitle className="text-base">Alerts checklist</CardTitle>
+        <CardDescription>Use this browser or installed app to receive visitor alerts.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {steps.map(({ icon: Icon, title, body }) => (
@@ -845,7 +870,7 @@ export default function ResidentPage() {
         <Tabs defaultValue="arrivals">
           <TabsList className={cn('w-full', tabCount === 4 ? 'grid grid-cols-4' : 'grid grid-cols-3')}>
             <TabsTrigger value="arrivals">Arrivals</TabsTrigger>
-            <TabsTrigger value="notifications">Setup</TabsTrigger>
+            <TabsTrigger value="notifications">Alerts</TabsTrigger>
             <TabsTrigger value="instructions">Notes</TabsTrigger>
             {isOwner && <TabsTrigger value="members"><Crown className="h-3.5 w-3.5 mr-1" />Members</TabsTrigger>}
           </TabsList>

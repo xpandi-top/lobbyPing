@@ -33,8 +33,10 @@ export default function JoinPage() {
   const [loading, setLoading] = useState(false)
   const [buildingName, setBuildingName] = useState<string | null>(null)
   const [buildingNotFound, setBuildingNotFound] = useState(false)
+  const [codeError, setCodeError] = useState<string | null>(null)
   const iosNeedsInstall = isIOS() && !isInstalledPWA()
-  const inviteUrl = appUrl(`join?b=${defaultBuilding}&code=${defaultCode}`)
+  const installUrl = appUrl('')
+  const hasInviteLink = !!defaultBuilding && !!defaultCode
   const [savedRooms] = useState(() => getSavedRooms())
   const [showJoinForm, setShowJoinForm] = useState(() => savedRooms.length === 0 || !!defaultBuilding || !!defaultCode)
 
@@ -67,10 +69,13 @@ export default function JoinPage() {
 
   async function onSubmit(data: FormData) {
     setLoading(true)
+    setCodeError(null)
     try {
       const result = await findInviteCode(data.buildingId, data.code)
       if (!result) {
-        toast.error('Invalid, expired, or already used invite code')
+        const message = 'This invite code is invalid, expired, or already used. If this link was already registered in another browser or app, ask the owner/admin for a new or transfer code.'
+        setCodeError(message)
+        toast.error('Invite code cannot be used')
         setLoading(false)
         return
       }
@@ -129,7 +134,7 @@ export default function JoinPage() {
           </div>
           <h1 className="text-2xl font-bold">LobbyPing</h1>
           <p className="text-muted-foreground text-sm">
-            {savedRooms.length > 0 ? 'Choose a home or add another invite code' : 'Enter your invite code to receive arrival notifications'}
+            {savedRooms.length > 0 ? 'Choose a home or add another invite code' : 'Install LobbyPing, then add your home with an invite code'}
           </p>
         </div>
 
@@ -150,18 +155,18 @@ export default function JoinPage() {
           </div>
         )}
 
-        {iosNeedsInstall && defaultBuilding && defaultCode && (
+        {iosNeedsInstall && (
           <Card>
             <CardHeader>
-              <CardTitle>iPhone setup note</CardTitle>
-              <CardDescription>iPhone notifications work only from the installed resident app.</CardDescription>
+              <CardTitle>Install first on iPhone</CardTitle>
+              <CardDescription>iPhone notifications work from the Home Screen app, not the Safari tab.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-3">
                 {[
-                  { icon: Smartphone, text: 'Register this device with your invite code' },
-                  { icon: Share, text: 'On the resident room page, tap Share in Safari' },
-                  { icon: PlusSquare, text: 'Choose Add to Home Screen and open LobbyPing from there' },
+                  { icon: Share, text: 'Open LobbyPing at /lobbyPing/ in Safari and tap Share' },
+                  { icon: PlusSquare, text: 'Choose Add to Home Screen' },
+                  { icon: Smartphone, text: 'Open LobbyPing from the Home Screen, then add this home' },
                 ].map(({ icon: Icon, text }, index) => (
                   <div key={text} className="flex items-center gap-3">
                     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
@@ -175,24 +180,24 @@ export default function JoinPage() {
                 ))}
               </div>
               <div className="rounded-md bg-muted p-3 text-sm">
-                <p className="text-xs text-muted-foreground">Keep this invite handy</p>
-                <p className="mt-1 font-mono text-xs break-all">{inviteUrl}</p>
+                <p className="text-xs text-muted-foreground">Install URL</p>
+                <p className="mt-1 font-mono text-xs break-all">{installUrl}</p>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="mt-3 w-full"
                   onClick={() => {
-                    navigator.clipboard.writeText(inviteUrl)
-                    toast.success('Invite link copied')
+                    navigator.clipboard.writeText(installUrl)
+                    toast.success('Install link copied')
                   }}
                 >
                   <Copy className="mr-2 h-3.5 w-3.5" />
-                  Copy Invite Link
+                  Copy Install Link
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Add to Home Screen from the resident room page after registration. The installed app will open that room, so you do not need to enter the building ID or invite code again.
+                Safari and the installed Home Screen app may not share saved room data. For the most reliable setup, install LobbyPing first, then {hasInviteLink ? 'register this invite code' : 'add your home with an invite code'} in the installed app.
               </p>
             </CardContent>
           </Card>
@@ -217,7 +222,7 @@ export default function JoinPage() {
                     {r.role === 'owner' ? <Crown className="h-4 w-4 text-primary" /> : <Users className="h-4 w-4 text-muted-foreground" />}
                     <div className="text-left">
                       <p className="font-medium text-sm">{r.buildingName}</p>
-                      <p className="text-xs text-muted-foreground">Room {r.roomNumber}</p>
+                      <p className="text-xs text-muted-foreground">Room {r.roomNumber} · {r.name}</p>
                     </div>
                   </div>
                   <Badge variant={r.role === 'owner' ? 'default' : 'secondary'} className="text-xs">
@@ -239,9 +244,15 @@ export default function JoinPage() {
           <Card>
             <CardHeader>
               <CardTitle>{savedRooms.length > 0 ? 'Add Home' : 'Redeem Invite Code'}</CardTitle>
-              <CardDescription>Your building administrator or homeowner provided this code</CardDescription>
+              <CardDescription>Invite codes can only register one browser or installed app once</CardDescription>
             </CardHeader>
             <CardContent>
+              {codeError && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>{codeError}</AlertDescription>
+                </Alert>
+              )}
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                 {!defaultBuilding && (
                   <div className="space-y-2">

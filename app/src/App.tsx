@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
@@ -11,7 +11,7 @@ import StatusPage from '@/pages/StatusPage'
 import AdminPage from '@/pages/AdminPage'
 
 function LaunchPage() {
-  return <Navigate to="/join" replace />
+  return <JoinPage />
 }
 
 export default function App() {
@@ -43,6 +43,7 @@ export default function App() {
     <BrowserRouter basename={import.meta.env.BASE_URL}>
       <div className="min-h-screen bg-background">
         <Routes>
+          <Route path="/" element={<JoinPage />} />
           <Route path="/visit" element={<VisitorPage />} />
           <Route path="/join" element={<JoinPage />} />
           <Route path="/home" element={<ResidentPage />} />
