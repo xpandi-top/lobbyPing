@@ -48,7 +48,7 @@ export default function JoinPage() {
       room.inviteCode?.toUpperCase() === code
     )
     if (matches.length === 1) {
-      navigate(`/resident?b=${matches[0].buildingId}&r=${matches[0].roomId}`, { replace: true })
+      navigate(`/home?b=${matches[0].buildingId}&r=${matches[0].roomId}`, { replace: true })
     }
   }, [defaultBuilding, defaultCode, navigate])
 
@@ -111,7 +111,7 @@ export default function JoinPage() {
       })
 
       toast.success(`Joined ${building?.name ?? 'building'} — Room ${room?.number}`)
-      navigate(`/resident?b=${data.buildingId}&r=${roomId}`)
+      navigate(`/home?b=${data.buildingId}&r=${roomId}`)
     } catch (err) {
       toast.error(`Registration failed: ${err instanceof Error ? err.message : String(err)}`)
       setLoading(false)
@@ -210,7 +210,7 @@ export default function JoinPage() {
                 <button
                   key={`${r.buildingId}-${r.roomId}`}
                   type="button"
-                  onClick={() => navigate(`/resident?b=${r.buildingId}&r=${r.roomId}`)}
+                  onClick={() => navigate(`/home?b=${r.buildingId}&r=${r.roomId}`)}
                   className="flex w-full items-center justify-between rounded-md border p-3 hover:bg-muted transition-colors"
                 >
                   <div className="flex items-center gap-2">

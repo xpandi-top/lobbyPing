@@ -45,6 +45,7 @@ export default function App() {
         <Routes>
           <Route path="/visit" element={<VisitorPage />} />
           <Route path="/join" element={<JoinPage />} />
+          <Route path="/home" element={<ResidentPage />} />
           <Route path="/resident" element={<ResidentPage />} />
           <Route path="/respond" element={<RespondPage />} />
           <Route path="/status" element={<StatusPage />} />

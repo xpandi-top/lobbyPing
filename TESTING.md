@@ -107,7 +107,7 @@ After deploy, push notifications fire automatically when visitor sends an arriva
 |----------|-----|
 | Admin    | `/#/admin?key=6oQLVcqa` |
 | Resident join | `/#/join?b=BUILDING_ID&code=INVITE_CODE` |
-| Resident dashboard | `/#/resident?b=BUILDING_ID&r=ROOM_ID` |
+| Resident dashboard | `/home?b=BUILDING_ID&r=ROOM_ID` |
 | Visitor  | `/#/visit?b=BUILDING_ID` |
 | Visitor status | `/#/status?b=B&r=R&a=ARRIVAL_ID` |
 | Resident respond | `/#/respond?b=B&r=R&a=ARRIVAL_ID` |

@@ -66,7 +66,7 @@ function RoomSelector({ currentBuildingId, currentRoomId }: { currentBuildingId:
           <button
             key={`${r.buildingId}-${r.roomId}`}
             type="button"
-            onClick={() => navigate(`/resident?b=${r.buildingId}&r=${r.roomId}`)}
+            onClick={() => navigate(`/home?b=${r.buildingId}&r=${r.roomId}`)}
             className={cn(
               'flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
               isCurrent
@@ -791,7 +791,7 @@ export default function ResidentPage() {
     if (!confirm('Leave this room? You will need a new invite code to rejoin.')) return
     removeSavedRoom(buildingId, roomId)
     const remaining = getSavedRooms()
-    if (remaining.length > 0) navigate(`/resident?b=${remaining[0].buildingId}&r=${remaining[0].roomId}`)
+    if (remaining.length > 0) navigate(`/home?b=${remaining[0].buildingId}&r=${remaining[0].roomId}`)
     else navigate('/join')
   }
 
