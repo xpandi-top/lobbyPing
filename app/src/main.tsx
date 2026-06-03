@@ -12,6 +12,12 @@ function normalizeHashRoute() {
   window.history.replaceState(null, '', nextUrl)
 }
 
+function normalizeResidentRoute() {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+  if (window.location.pathname !== `${base}/resident`) return
+  window.history.replaceState(null, '', `${base}/home${window.location.search}${window.location.hash}`)
+}
+
 function installCurrentPageManifest() {
   const url = new URL(window.location.href)
   const startUrl = `${url.pathname}${url.search}`
@@ -40,6 +46,7 @@ function installCurrentPageManifest() {
 }
 
 normalizeHashRoute()
+normalizeResidentRoute()
 installCurrentPageManifest()
 
 createRoot(document.getElementById('root')!).render(

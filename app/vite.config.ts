@@ -15,6 +15,8 @@ export default defineConfig({
       manifest: false,
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        navigateFallback: '/lobbyPing/index.html',
+        navigateFallbackAllowlist: [/^\/lobbyPing\/(?!.*\.[^/]+$).*/],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/firestore\.googleapis\.com\/.*/i,
