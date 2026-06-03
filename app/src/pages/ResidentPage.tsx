@@ -34,7 +34,15 @@ import {
   requestNotificationPermission, getFCMToken, sendTestNotification,
   isIOS, isInstalledPWA, detectPlatform,
 } from '@/lib/fcm'
-import { getSavedRooms, getSavedRoom, removeSavedRoom } from '@/lib/storage'
+import {
+  getDismissedArrivalIds,
+  getLocalArrivals,
+  getSavedRooms,
+  getSavedRoom,
+  removeLocalArrival,
+  removeSavedRoom,
+  saveLocalArrivals,
+} from '@/lib/storage'
 import type {
   Room, Device, InviteCode, Arrival, ResidentResponse, ArrivalType,
   DeliveryInstructions,
@@ -217,6 +225,61 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
   )
 }
 
+function NotificationGuide() {
+  const ios = isIOS()
+  const permission = 'Notification' in window ? Notification.permission : 'denied'
+  const installText = ios
+    ? 'In Safari, use Share, Add to Home Screen, then open LobbyPing from the new app icon.'
+    : 'Use the browser install option when available, then keep this device signed in.'
+
+  const steps = [
+    {
+      icon: Smartphone,
+      title: ios ? 'Install on Home Screen' : 'Install or keep open',
+      body: installText,
+    },
+    {
+      icon: Bell,
+      title: permission === 'denied' ? 'Unblock notifications' : 'Allow notifications',
+      body: permission === 'denied'
+        ? 'Open browser or system settings for LobbyPing, allow notifications, then reload.'
+        : 'Tap Enable Notifications and choose Allow in the browser prompt.',
+    },
+    {
+      icon: BellRing,
+      title: 'Send a test',
+      body: 'Use Send Test Notification to confirm sound, banners, and Focus settings.',
+    },
+  ]
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Setup checklist</CardTitle>
+        <CardDescription>Use this device to receive visitor alerts.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {steps.map(({ icon: Icon, title, body }) => (
+          <div key={title} className="flex items-start gap-3">
+            <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium">{title}</p>
+              <p className="text-sm text-muted-foreground">{body}</p>
+            </div>
+          </div>
+        ))}
+        <Separator />
+        <div className="rounded-md bg-muted px-3 py-2">
+          <div className="flex items-start gap-2 text-sm text-muted-foreground">
+            <Settings className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Still not arriving? Check browser notifications, system notifications, Focus, and sound settings.</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 // ── Active Arrivals ────────────────────────────────────────────────────────
 
 const TYPE_LABELS: Record<ArrivalType, string> = { package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Other' }
@@ -244,9 +307,10 @@ const RESPONSE_OPTIONS: { value: ResidentResponse; label: string; icon: React.FC
   { value: 'no_need_to_wait', label: 'No Need to Wait', icon: XCircle, color: 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100' },
 ]
 
-function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, responderRole }: {
+function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, responderRole, onRemove }: {
   arrival: Arrival; buildingId: string; roomId: string
   canRespond: boolean; responderName: string; responderRole: 'owner' | 'member'
+  onRemove: (arrivalId: string) => void
 }) {
   const [responding, setResponding] = useState(false)
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
@@ -274,7 +338,7 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
   return (
     <Card className={cn('border-2', isExpired ? 'opacity-60' : hasResponded ? 'border-green-200' : 'border-primary/30 shadow-md')}>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <CardTitle className="text-base">{TYPE_LABELS[arrival.type] ?? arrival.type}</CardTitle>
             {isPending && !isMissed && <Badge variant="default" className="text-xs animate-pulse">Waiting</Badge>}
@@ -283,16 +347,27 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
             {/* Only show Expired if not already responded */}
             {isExpired && !hasResponded && <Badge variant="outline" className="text-xs">Expired</Badge>}
           </div>
-          {/* Only show elapsed timer on pending/missed arrivals */}
-          {(isPending || isMissed) && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              {arrival.reminderCount > 0 && <span className="text-orange-500">{arrival.reminderCount}× </span>}
-              <Clock className="h-3 w-3" />
-              <span className={cn('font-mono', overWait ? 'text-destructive font-semibold' : '')}>
-                {formatElapsed(elapsed)}
-              </span>
-            </div>
-          )}
+          <div className="flex shrink-0 items-center gap-1">
+            {/* Only show elapsed timer on pending/missed arrivals */}
+            {(isPending || isMissed) && (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                {arrival.reminderCount > 0 && <span className="text-orange-500">{arrival.reminderCount}× </span>}
+                <Clock className="h-3 w-3" />
+                <span className={cn('font-mono', overWait ? 'text-destructive font-semibold' : '')}>
+                  {formatElapsed(elapsed)}
+                </span>
+              </div>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Remove from this device"
+              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+              onClick={() => onRemove(arrival.id)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
         {/* Wait progress bar — only show while actively pending (not missed/expired/responded) */}
         {isPending && !isMissed && (
@@ -379,15 +454,26 @@ function ActiveArrivals({ buildingId, roomId, canRespond, responderName, respond
   buildingId: string; roomId: string; canRespond: boolean
   responderName: string; responderRole: 'owner' | 'member'
 }) {
-  const [arrivals, setArrivals] = useState<Arrival[]>([])
+  const [arrivals, setArrivals] = useState<Arrival[]>(() => getLocalArrivals(buildingId, roomId))
 
   useEffect(() => {
     if (!buildingId || !roomId) return
-    const q = query(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'), where('status', 'in', ['pending', 'responded']))
+    // Include 'expired' so arrivals with visitor notes stay visible until Cloud Function cleans them up (30min)
+    const q = query(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'), where('status', 'in', ['pending', 'responded', 'expired']))
     return onSnapshot(q, (snap) => {
-      setArrivals(snap.docs.map(d => ({ id: d.id, ...d.data() }) as Arrival).sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis()))
+      const dismissed = getDismissedArrivalIds(buildingId, roomId)
+      const liveArrivals = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }) as Arrival)
+        .filter((arrival) => !dismissed.has(arrival.id))
+      setArrivals(saveLocalArrivals(buildingId, roomId, liveArrivals))
     })
   }, [buildingId, roomId])
+
+  function handleRemove(arrivalId: string) {
+    removeLocalArrival(buildingId, roomId, arrivalId)
+    setArrivals(getLocalArrivals(buildingId, roomId))
+    toast.success('Removed from this device')
+  }
 
   if (arrivals.length === 0) {
     return (
@@ -402,7 +488,8 @@ function ActiveArrivals({ buildingId, roomId, canRespond, responderName, respond
     <div className="space-y-3">
       {arrivals.map(a => (
         <ArrivalCard key={a.id} arrival={a} buildingId={buildingId} roomId={roomId}
-          canRespond={canRespond} responderName={responderName} responderRole={responderRole} />
+          canRespond={canRespond} responderName={responderName} responderRole={responderRole}
+          onRemove={handleRemove} />
       ))}
     </div>
   )
@@ -744,18 +831,21 @@ export default function ResidentPage() {
         <Tabs defaultValue="arrivals">
           <TabsList className={cn('w-full', tabCount === 4 ? 'grid grid-cols-4' : 'grid grid-cols-3')}>
             <TabsTrigger value="arrivals">Arrivals</TabsTrigger>
-            <TabsTrigger value="notifications">Alerts</TabsTrigger>
+            <TabsTrigger value="notifications">Setup</TabsTrigger>
             <TabsTrigger value="instructions">Notes</TabsTrigger>
             {isOwner && <TabsTrigger value="members"><Crown className="h-3.5 w-3.5 mr-1" />Members</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="arrivals" className="mt-4">
-            <ActiveArrivals buildingId={buildingId} roomId={roomId} canRespond={canRespond}
+            <ActiveArrivals key={`${buildingId}-${roomId}`} buildingId={buildingId} roomId={roomId} canRespond={canRespond}
               responderName={responderName} responderRole={responderRole} />
           </TabsContent>
 
           <TabsContent value="notifications" className="mt-4">
-            <SetupWizard buildingId={buildingId} roomId={roomId} />
+            <div className="space-y-4">
+              <SetupWizard buildingId={buildingId} roomId={roomId} />
+              <NotificationGuide />
+            </div>
           </TabsContent>
 
           <TabsContent value="instructions" className="mt-4">

@@ -101,7 +101,7 @@ function AckPanel({
       // no_response mode: also close the arrival so resident sees it as expired
       await sendVisitorAck(buildingId, roomId, arrivalId, message, mode === 'no_response')
       setSent(true)
-      if (mode === 'no_response') onFinalAckSent?.()
+      onFinalAckSent?.()
     } catch (err) {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`)
       setSending(false)
@@ -182,6 +182,7 @@ export default function StatusPage() {
   const [arrival, setArrival] = useState<Arrival | null | undefined>(undefined)
   const [instructions, setInstructions] = useState<{ package: string; food: string; guest: string } | null>(null)
   const [reminderCooldown, setReminderCooldown] = useState(0)
+  const [ackSent, setAckSent] = useState(false)
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -245,9 +246,9 @@ export default function StatusPage() {
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponse = arrival.status === 'responded' && arrival.response
   const noResponse = !hasResponse && (isExpired || overWait)
-  // Done: visitor sent final ack AND arrival is now expired (set by sendVisitorAck closeArrival=true)
-  // Also covers: page reload after ack already sent
-  const isDone = !!arrival.visitorAck && (isExpired || noResponse)
+  // Done once the visitor acknowledges, for both resident-response and no-response flows.
+  // ackSent closes immediately while visitorAck covers page reloads after the write lands.
+  const isDone = ackSent || !!arrival.visitorAck
 
   if (isDone) {
     return (
@@ -327,6 +328,7 @@ export default function StatusPage() {
                   roomId={roomId}
                   arrivalId={arrivalId}
                   mode="responded"
+                  onFinalAckSent={() => setAckSent(true)}
                 />
               </>
             ) : noResponse ? (
@@ -356,7 +358,7 @@ export default function StatusPage() {
                   roomId={roomId}
                   arrivalId={arrivalId}
                   mode="no_response"
-                  onFinalAckSent={() => { /* isDone now computed reactively */ }}
+                  onFinalAckSent={() => setAckSent(true)}
                 />
               </>
             ) : (
