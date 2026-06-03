@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { Bell, MapPin, AlertTriangle, Crown, Users, Share, PlusSquare, Smartphone, Copy } from 'lucide-react'
+import { Bell, MapPin, AlertTriangle, Crown, Users, Share, PlusSquare, Smartphone, Copy, Plus } from 'lucide-react'
 import { getAuth } from 'firebase/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -14,7 +14,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { findInviteCode, redeemInviteCode, registerDevice, getBuilding, getRoom } from '@/lib/firestore'
 import { getFCMToken, detectPlatform, isIOS, isInstalledPWA } from '@/lib/fcm'
-import { saveRoom, getSavedRooms, getLastResidentRoom } from '@/lib/storage'
+import { saveRoom, getSavedRooms } from '@/lib/storage'
 import { appUrl } from '@/lib/utils'
 
 const schema = z.object({
@@ -36,18 +36,7 @@ export default function JoinPage() {
   const iosNeedsInstall = isIOS() && !isInstalledPWA()
   const inviteUrl = appUrl(`join?b=${defaultBuilding}&code=${defaultCode}`)
   const [savedRooms] = useState(() => getSavedRooms())
-
-  useEffect(() => {
-    if (defaultBuilding || defaultCode) return
-    const lastRoom = getLastResidentRoom()
-    if (lastRoom) {
-      navigate(`/resident?b=${lastRoom.buildingId}&r=${lastRoom.roomId}`, { replace: true })
-      return
-    }
-    if (savedRooms.length === 1) {
-      navigate(`/resident?b=${savedRooms[0].buildingId}&r=${savedRooms[0].roomId}`, { replace: true })
-    }
-  }, [defaultBuilding, defaultCode, navigate, savedRooms])
+  const [showJoinForm, setShowJoinForm] = useState(() => savedRooms.length === 0 || !!defaultBuilding || !!defaultCode)
 
   // If the resident refreshes an invite link after redeeming it, recover from
   // local device state instead of asking them to reuse a one-time code.
@@ -138,8 +127,10 @@ export default function JoinPage() {
               <Bell className="h-8 w-8 text-primary" />
             </div>
           </div>
-          <h1 className="text-2xl font-bold">Join LobbyPing</h1>
-          <p className="text-muted-foreground text-sm">Enter your invite code to receive arrival notifications</p>
+          <h1 className="text-2xl font-bold">LobbyPing</h1>
+          <p className="text-muted-foreground text-sm">
+            {savedRooms.length > 0 ? 'Choose a home or add another invite code' : 'Enter your invite code to receive arrival notifications'}
+          </p>
         </div>
 
         {buildingNotFound && (
@@ -207,43 +198,12 @@ export default function JoinPage() {
           </Card>
         )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Redeem Invite Code</CardTitle>
-            <CardDescription>Your building administrator or homeowner provided this code</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              {!defaultBuilding && (
-                <div className="space-y-2">
-                  <Label htmlFor="buildingId">Building ID</Label>
-                  <Input id="buildingId" placeholder="Provided by admin" {...register('buildingId')} />
-                  {errors.buildingId && <p className="text-sm text-destructive">{errors.buildingId.message}</p>}
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label htmlFor="name">Your name</Label>
-                <Input id="name" placeholder="e.g. Alice" autoComplete="given-name" {...register('name')} />
-                {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="code">Invite Code</Label>
-                <Input id="code" placeholder="e.g. ABC123" autoCapitalize="characters"
-                  className="tracking-widest text-lg h-12 uppercase" {...register('code')} />
-                {errors.code && <p className="text-sm text-destructive">{errors.code.message}</p>}
-              </div>
-              <Button type="submit" disabled={loading} className="w-full h-12 text-base">
-                {loading ? 'Registering…' : 'Register Device'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
         {/* Already joined rooms */}
         {savedRooms.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">Already Joined</CardTitle>
+              <CardTitle className="text-base">Your Homes</CardTitle>
+              <CardDescription>Homes registered on this device</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {savedRooms.map((r) => (
@@ -265,6 +225,53 @@ export default function JoinPage() {
                   </Badge>
                 </button>
               ))}
+              {!showJoinForm && (
+                <Button type="button" variant="outline" className="w-full" onClick={() => setShowJoinForm(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Home
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {showJoinForm && (
+          <Card>
+            <CardHeader>
+              <CardTitle>{savedRooms.length > 0 ? 'Add Home' : 'Redeem Invite Code'}</CardTitle>
+              <CardDescription>Your building administrator or homeowner provided this code</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                {!defaultBuilding && (
+                  <div className="space-y-2">
+                    <Label htmlFor="buildingId">Building ID</Label>
+                    <Input id="buildingId" placeholder="Provided by admin" {...register('buildingId')} />
+                    {errors.buildingId && <p className="text-sm text-destructive">{errors.buildingId.message}</p>}
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="name">Your name</Label>
+                  <Input id="name" placeholder="e.g. Alice" autoComplete="given-name" {...register('name')} />
+                  {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="code">Invite Code</Label>
+                  <Input id="code" placeholder="e.g. ABC123" autoCapitalize="characters"
+                    className="tracking-widest text-lg h-12 uppercase" {...register('code')} />
+                  {errors.code && <p className="text-sm text-destructive">{errors.code.message}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Button type="submit" disabled={loading} className="w-full h-12 text-base">
+                    {loading ? 'Registering…' : savedRooms.length > 0 ? 'Add Home' : 'Register Device'}
+                  </Button>
+                  {savedRooms.length > 0 && !defaultBuilding && !defaultCode && (
+                    <Button type="button" variant="ghost" className="w-full" onClick={() => setShowJoinForm(false)}>
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </form>
             </CardContent>
           </Card>
         )}
