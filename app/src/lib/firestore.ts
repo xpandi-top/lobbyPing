@@ -327,11 +327,16 @@ export async function sendVisitorAck(
   buildingId: string,
   roomId: string,
   arrivalId: string,
-  message: string
+  message: string,
+  closeArrival = false  // true when visitor is done (no-response flow) — marks status expired
 ): Promise<void> {
   await updateDoc(
     doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
-    { visitorAck: message, visitorAckTime: serverTimestamp() }
+    {
+      visitorAck: message,
+      visitorAckTime: serverTimestamp(),
+      ...(closeArrival ? { status: 'expired' } : {}),
+    }
   )
 }
 

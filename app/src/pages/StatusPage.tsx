@@ -98,7 +98,8 @@ function AckPanel({
     if (sending || sent) return
     setSending(true)
     try {
-      await sendVisitorAck(buildingId, roomId, arrivalId, message)
+      // no_response mode: also close the arrival so resident sees it as expired
+      await sendVisitorAck(buildingId, roomId, arrivalId, message, mode === 'no_response')
       setSent(true)
       if (mode === 'no_response') onFinalAckSent?.()
     } catch (err) {
@@ -244,8 +245,9 @@ export default function StatusPage() {
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponse = arrival.status === 'responded' && arrival.response
   const noResponse = !hasResponse && (isExpired || overWait)
-  // Show done screen when visitor sent a final message on no-response flow
-  const isDone = noResponse && !!arrival.visitorAck
+  // Done: visitor sent final ack AND arrival is now expired (set by sendVisitorAck closeArrival=true)
+  // Also covers: page reload after ack already sent
+  const isDone = !!arrival.visitorAck && (isExpired || noResponse)
 
   if (isDone) {
     return (
@@ -264,9 +266,6 @@ export default function StatusPage() {
             <Button className="w-full" onClick={() => navigate(`/visit?b=${buildingId}`)}>
               <Bell className="h-4 w-4 mr-2" />
               Notify another room
-            </Button>
-            <Button variant="ghost" className="w-full text-muted-foreground" onClick={() => window.close()}>
-              Close
             </Button>
           </div>
         </div>

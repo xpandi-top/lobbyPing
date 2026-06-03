@@ -79,12 +79,16 @@ service cloud.firestore {
                 request.resource.data.status == 'responded' &&
                 resource.data.status == 'pending'
               ) ||
-              // Visitor ack (after response or on expiry/no-response)
+              // Visitor ack — optionally also closes arrival (status=expired) on no-response flow
               (
                 request.resource.data.diff(resource.data).affectedKeys()
-                  .hasOnly(['visitorAck','visitorAckTime']) &&
+                  .hasOnly(['visitorAck','visitorAckTime','status']) &&
                 request.resource.data.visitorAck is string &&
-                request.resource.data.visitorAck.size() <= 200
+                request.resource.data.visitorAck.size() <= 200 &&
+                (
+                  !('status' in request.resource.data.diff(resource.data).affectedKeys()) ||
+                  request.resource.data.status == 'expired'
+                )
               ) ||
               // Expire (Cloud Function)
               (
