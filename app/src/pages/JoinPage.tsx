@@ -55,7 +55,7 @@ export default function JoinPage() {
     const code = defaultCode.toUpperCase()
     const matches = getSavedRooms().filter((room) =>
       room.buildingId === defaultBuilding &&
-      (!room.inviteCode || room.inviteCode.toUpperCase() === code)
+      room.inviteCode?.toUpperCase() === code
     )
     if (matches.length === 1) {
       navigate(`/resident?b=${matches[0].buildingId}&r=${matches[0].roomId}`, { replace: true })
