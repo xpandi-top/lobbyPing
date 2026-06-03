@@ -11,7 +11,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon-light.png', 'icon-dark.png'],
+      includeAssets: ['apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'icon-light.png', 'icon-dark.png'],
       manifest: {
         name: 'LobbyPing',
         short_name: 'LobbyPing',
@@ -24,13 +24,19 @@ export default defineConfig({
         scope: '/lobbyPing/',
         icons: [
           {
-            src: 'icon-light.png',
+            src: 'icon-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: 'icon-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any',
           },
           {
-            src: 'icon-light.png',
+            src: 'icon-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',
