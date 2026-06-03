@@ -9,8 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { getBuildingBySlug, getBuilding, getRoomByNumber, createArrival } from '@/lib/firestore'
-import type { ArrivalType, WaitTime } from '@/lib/types'
+import { getBuildingBySlug, getBuilding, getRoomByNumber, createArrival, listRooms } from '@/lib/firestore'
+import type { ArrivalType, Room, WaitTime } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 const schema = z.object({
@@ -32,6 +32,10 @@ const WAIT_TIMES: { value: WaitTime; label: string }[] = [
   { value: '5min', label: '5 minutes' },
 ]
 
+function sortRooms(rooms: Room[]) {
+  return [...rooms].sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' }))
+}
+
 export default function VisitorPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -41,29 +45,46 @@ export default function VisitorPage() {
   const [waitTime, setWaitTime] = useState<WaitTime>('2min')
   const [roomNumber, setRoomNumber] = useState('')
   const [buildingName, setBuildingName] = useState<string | null>(null)
+  const [buildingId, setBuildingId] = useState<string | null>(null)
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [loadingRooms, setLoadingRooms] = useState(false)
+
+  const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormData>({
+    resolver: zodResolver(schema),
+  })
 
   useEffect(() => {
     if (!buildingParam) return
     const load = async () => {
       try {
+        let building = null
         if (!buildingParam.match(/^[A-Za-z0-9]{20}$/)) {
-          const b = await getBuildingBySlug(buildingParam)
-          if (b) setBuildingName(b.name)
+          building = await getBuildingBySlug(buildingParam)
         } else {
-          const b = await getBuilding(buildingParam)
-          if (b) setBuildingName(b.name)
+          building = await getBuilding(buildingParam)
+        }
+
+        if (building) {
+          setBuildingId(building.id)
+          setBuildingName(building.name)
+          setLoadingRooms(true)
+          const buildingRooms = await listRooms(building.id)
+          setRooms(sortRooms(buildingRooms))
         }
       } catch { /* non-critical */ }
+      finally { setLoadingRooms(false) }
     }
     load()
   }, [buildingParam])
 
-  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
-    resolver: zodResolver(schema),
-  })
-
   async function onRoomSubmit(data: FormData) {
-    setRoomNumber(data.room)
+    setRoomNumber(data.room.trim())
+    setStep('type')
+  }
+
+  function selectRoom(number: string) {
+    setValue('room', number)
+    setRoomNumber(number)
     setStep('type')
   }
 
@@ -76,26 +97,26 @@ export default function VisitorPage() {
         return
       }
 
-      let buildingId = buildingParam
+      let resolvedBuildingId = buildingId ?? buildingParam
       // Slug (short, human-readable) vs Firestore auto-ID (20 alphanum chars)
-      if (!buildingId.match(/^[A-Za-z0-9]{20}$/)) {
-        const building = await getBuildingBySlug(buildingId)
+      if (!resolvedBuildingId.match(/^[A-Za-z0-9]{20}$/)) {
+        const building = await getBuildingBySlug(resolvedBuildingId)
         if (!building) { toast.error('Building not found.'); setStep('wait'); return }
-        buildingId = building.id
+        resolvedBuildingId = building.id
       } else {
-        const building = await getBuilding(buildingId)
+        const building = await getBuilding(resolvedBuildingId)
         if (!building) { toast.error('Building not found.'); setStep('wait'); return }
       }
 
-      const room = await getRoomByNumber(buildingId, roomNumber)
+      const room = await getRoomByNumber(resolvedBuildingId, roomNumber)
       if (!room) {
         toast.error('Room not found. Check the number and try again.')
         setStep('type')
         return
       }
 
-      const arrivalId = await createArrival(buildingId, room.id, roomNumber, arrivalType, waitTime)
-      navigate(`/status?b=${buildingId}&r=${room.id}&a=${arrivalId}`)
+      const arrivalId = await createArrival(resolvedBuildingId, room.id, roomNumber, arrivalType, waitTime)
+      navigate(`/status?b=${resolvedBuildingId}&r=${room.id}&a=${arrivalId}`)
     } catch (err) {
       console.error('[VisitorPage] onSend error:', err)
       toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
@@ -129,9 +150,35 @@ export default function VisitorPage() {
           <Card>
             <CardHeader>
               <CardTitle>Which room?</CardTitle>
-              <CardDescription>Enter the resident's room number</CardDescription>
+              <CardDescription>Tap a room or enter the number</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {(loadingRooms || rooms.length > 0) && (
+                <div className="space-y-2">
+                  <Label>Available rooms</Label>
+                  {loadingRooms ? (
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                      {Array.from({ length: 6 }).map((_, index) => (
+                        <div key={index} className="h-11 rounded-lg bg-muted" />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid max-h-56 grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-4">
+                      {rooms.map((room) => (
+                        <button
+                          key={room.id}
+                          type="button"
+                          onClick={() => selectRoom(room.number)}
+                          className="min-w-0 truncate rounded-lg border border-border bg-background px-2 py-3 text-sm font-semibold transition-colors hover:border-primary hover:bg-primary/5 hover:text-primary"
+                        >
+                          {room.number}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <form onSubmit={handleSubmit(onRoomSubmit)} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="room">Room number</Label>

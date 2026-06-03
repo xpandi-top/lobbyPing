@@ -206,6 +206,10 @@ First response wins.
 
 3. Enter room number
 
+   If registered rooms are available, the visitor may tap a room number
+   instead of typing it. Manual entry remains available for rooms that
+   are not listed yet.
+
 4. Select arrival type
 
 Options:
@@ -224,6 +228,24 @@ Options:
 - 5 minutes
 
 6. Send notification
+
+---
+
+## Future Task: Visitor Passcodes
+
+Owners may require a visitor passcode before a notification can be sent.
+
+Purpose:
+
+Prevent unwanted or repeated lobby notifications when a building wants
+extra control over public QR access.
+
+Expected behavior:
+
+- Owner can enable or disable passcode requirement per room
+- Visitor enters the passcode after selecting a room
+- Notification is created only when the passcode is valid
+- Manual room entry and quick room selection both respect the passcode
 
 ---
 
