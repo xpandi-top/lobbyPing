@@ -45,7 +45,7 @@ export default function App() {
           <Route path="/respond" element={<RespondPage />} />
           <Route path="/status" element={<StatusPage />} />
           <Route path="/admin" element={<AdminPage />} />
-          <Route path="*" element={<Navigate to="/visit" replace />} />
+          <Route path="*" element={<Navigate to="/join" replace />} />
         </Routes>
       </div>
       <Toaster position="top-center" richColors />

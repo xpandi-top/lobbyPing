@@ -93,5 +93,7 @@ export interface SavedRoom {
   name: string          // display name
   buildingName: string
   roomNumber: string
+  inviteCode?: string
+  inviteCodeId?: string
   joinedAt: number  // Date.now()
 }

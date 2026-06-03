@@ -21,7 +21,7 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait',
         scope: '/lobbyPing/',
-        start_url: '/lobbyPing/',
+        start_url: '/lobbyPing/#/join',
         icons: [
           {
             src: 'icon-light.png',

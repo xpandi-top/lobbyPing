@@ -91,10 +91,12 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
   const savedRoom = getSavedRoom(buildingId, roomId)
   const ios = isIOS()
   const installed = isInstalledPWA()
+  const notificationSupported = 'Notification' in window
   const [step, setStep] = useState<SetupStep>(() => {
+    if (ios && !installed) return 'add_to_home'
+    if (!notificationSupported) return 'blocked'
     if (Notification.permission === 'granted') return 'done'
     if (Notification.permission === 'denied') return 'blocked'
-    if (!installed && ios) return 'add_to_home'
     return 'enable'
   })
   const [testing, setTesting] = useState(false)
@@ -163,8 +165,12 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
           <div className="flex items-center gap-3">
             <AlertTriangle className="h-6 w-6 text-destructive shrink-0" />
             <div>
-              <p className="font-semibold">Notifications blocked</p>
-              <p className="text-sm text-muted-foreground">Enable notifications in browser/OS settings, then reload.</p>
+              <p className="font-semibold">{notificationSupported ? 'Notifications blocked' : 'Notifications unavailable'}</p>
+              <p className="text-sm text-muted-foreground">
+                {notificationSupported
+                  ? 'Enable notifications in browser/OS settings, then reload.'
+                  : 'Open LobbyPing from the installed app on your Home Screen to enable alerts.'}
+              </p>
             </div>
           </div>
           <Button variant="outline" onClick={() => window.location.reload()} className="w-full">Reload Page</Button>
@@ -183,16 +189,22 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
       <CardContent className="space-y-4">
         {step === 'add_to_home' && (
           <div className="space-y-4">
-            <Alert><Smartphone className="h-4 w-4" /><AlertDescription>iOS requires LobbyPing to be installed as an app to receive notifications.</AlertDescription></Alert>
+            <Alert><Smartphone className="h-4 w-4" /><AlertDescription>iPhone requires the resident app to be installed before notifications can be enabled.</AlertDescription></Alert>
             <div className="space-y-3">
-              {[{ icon: Share, text: 'Tap the Share button in Safari' }, { icon: PlusSquare, text: 'Tap "Add to Home Screen"' }, { icon: Smartphone, text: 'Open LobbyPing from your Home Screen' }].map(({ icon: Icon, text }, i) => (
+              {[{ icon: Share, text: 'Open your resident invite link, then tap Share in Safari' }, { icon: PlusSquare, text: 'Tap "Add to Home Screen"' }, { icon: Smartphone, text: 'Open LobbyPing from the Home Screen to finish setup' }].map(({ icon: Icon, text }, i) => (
                 <div key={i} className="flex items-center gap-3">
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">{i + 1}</div>
                   <div className="flex items-center gap-2 text-sm"><Icon className="h-4 w-4 text-muted-foreground" /><span>{text}</span></div>
                 </div>
               ))}
             </div>
-            <Button onClick={() => setStep('enable')} className="w-full">{installed ? "I've opened from Home Screen" : "I've added to Home Screen"}</Button>
+            {installed ? (
+              <Button onClick={() => setStep('enable')} className="w-full">Continue Notification Setup</Button>
+            ) : (
+              <Button variant="outline" onClick={() => window.location.reload()} className="w-full">
+                I opened it from Home Screen
+              </Button>
+            )}
           </div>
         )}
         {(step === 'enable' || step === 'enabling') && (

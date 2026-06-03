@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { Bell, MapPin, AlertTriangle, Crown, Users } from 'lucide-react'
+import { Bell, MapPin, AlertTriangle, Crown, Users, Share, PlusSquare, Smartphone, Copy } from 'lucide-react'
 import { getAuth } from 'firebase/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { findInviteCode, redeemInviteCode, registerDevice, getBuilding, getRoom } from '@/lib/firestore'
-import { getFCMToken, detectPlatform } from '@/lib/fcm'
+import { getFCMToken, detectPlatform, isIOS, isInstalledPWA } from '@/lib/fcm'
 import { saveRoom, getSavedRooms } from '@/lib/storage'
 
 const schema = z.object({
@@ -32,6 +32,28 @@ export default function JoinPage() {
   const [loading, setLoading] = useState(false)
   const [buildingName, setBuildingName] = useState<string | null>(null)
   const [buildingNotFound, setBuildingNotFound] = useState(false)
+  const iosNeedsInstall = isIOS() && !isInstalledPWA()
+  const inviteUrl = `${window.location.origin}${window.location.pathname}#/join?b=${defaultBuilding}&code=${defaultCode}`
+  const [savedRooms] = useState(() => getSavedRooms())
+
+  useEffect(() => {
+    if (defaultBuilding || defaultCode || savedRooms.length !== 1) return
+    navigate(`/resident?b=${savedRooms[0].buildingId}&r=${savedRooms[0].roomId}`, { replace: true })
+  }, [defaultBuilding, defaultCode, navigate, savedRooms])
+
+  // If the resident refreshes an invite link after redeeming it, recover from
+  // local device state instead of asking them to reuse a one-time code.
+  useEffect(() => {
+    if (!defaultBuilding || !defaultCode) return
+    const code = defaultCode.toUpperCase()
+    const matches = getSavedRooms().filter((room) =>
+      room.buildingId === defaultBuilding &&
+      (!room.inviteCode || room.inviteCode.toUpperCase() === code)
+    )
+    if (matches.length === 1) {
+      navigate(`/resident?b=${matches[0].buildingId}&r=${matches[0].roomId}`, { replace: true })
+    }
+  }, [defaultBuilding, defaultCode, navigate])
 
   useEffect(() => {
     if (!defaultBuilding) return
@@ -40,9 +62,6 @@ export default function JoinPage() {
       else setBuildingNotFound(true)
     }).catch(() => setBuildingNotFound(true))
   }, [defaultBuilding])
-
-  // If user already has saved rooms, show them
-  const savedRooms = getSavedRooms()
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -89,6 +108,8 @@ export default function JoinPage() {
         name: data.name,
         buildingName: building?.name ?? 'Unknown Building',
         roomNumber: room?.number ?? '?',
+        inviteCode: data.code.toUpperCase(),
+        inviteCodeId: inviteCode.id,
         joinedAt: Date.now(),
       })
 
@@ -130,6 +151,54 @@ export default function JoinPage() {
           </div>
         )}
 
+        {iosNeedsInstall && defaultBuilding && defaultCode && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Install before registering</CardTitle>
+              <CardDescription>iPhone notifications work only from the installed resident app.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-3">
+                {[
+                  { icon: Share, text: 'Tap Share in Safari while this invite page is open' },
+                  { icon: PlusSquare, text: 'Choose Add to Home Screen' },
+                  { icon: Smartphone, text: 'Open LobbyPing from the Home Screen, then register here' },
+                ].map(({ icon: Icon, text }, index) => (
+                  <div key={text} className="flex items-center gap-3">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+                      {index + 1}
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      <Icon className="h-4 w-4 text-muted-foreground" />
+                      <span>{text}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-md bg-muted p-3 text-sm">
+                <p className="text-xs text-muted-foreground">Keep this invite handy</p>
+                <p className="mt-1 font-mono text-xs break-all">{inviteUrl}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 w-full"
+                  onClick={() => {
+                    navigator.clipboard.writeText(inviteUrl)
+                    toast.success('Invite link copied')
+                  }}
+                >
+                  <Copy className="mr-2 h-3.5 w-3.5" />
+                  Copy Invite Link
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Do not redeem the code in Safari first. Register after opening the installed app so refresh and notifications work on this device.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle>Redeem Invite Code</CardTitle>
@@ -155,8 +224,10 @@ export default function JoinPage() {
                   className="tracking-widest text-lg h-12 uppercase" {...register('code')} />
                 {errors.code && <p className="text-sm text-destructive">{errors.code.message}</p>}
               </div>
-              <Button type="submit" disabled={loading} className="w-full h-12 text-base">
-                {loading ? 'Registering…' : 'Register Device'}
+              <Button type="submit" disabled={loading || (iosNeedsInstall && !!defaultBuilding && !!defaultCode)} className="w-full h-12 text-base">
+                {iosNeedsInstall && defaultBuilding && defaultCode
+                  ? 'Install App First'
+                  : loading ? 'Registering…' : 'Register Device'}
               </Button>
             </form>
           </CardContent>
