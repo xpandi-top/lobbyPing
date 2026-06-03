@@ -254,6 +254,7 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
   const waitMs = WAIT_MS[arrival.waitTime] ?? 120_000
   const waitProgress = Math.min(100, Math.round((elapsed / waitMs) * 100))
   const overWait = elapsed > waitMs
+  const isMissed = !hasResponded && !isExpired && overWait
 
   async function handleResponse(response: ResidentResponse) {
     if (responding || !canRespond) return
@@ -273,7 +274,8 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CardTitle className="text-base">{TYPE_LABELS[arrival.type] ?? arrival.type}</CardTitle>
-            {!hasResponded && !isExpired && <Badge variant="default" className="text-xs animate-pulse">Waiting</Badge>}
+            {!hasResponded && !isExpired && !isMissed && <Badge variant="default" className="text-xs animate-pulse">Waiting</Badge>}
+            {isMissed && <Badge variant="destructive" className="text-xs">Missed</Badge>}
             {hasResponded && <Badge variant="secondary" className="text-xs">Responded</Badge>}
             {isExpired && <Badge variant="outline" className="text-xs">Expired</Badge>}
           </div>
@@ -319,15 +321,32 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
               </div>
             )}
           </div>
-        ) : isExpired ? (
+        ) : isMissed || isExpired ? (
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">No response — visitor left.</p>
+            <p className="text-sm text-muted-foreground">
+              {isMissed ? 'Visitor\'s wait time passed — no response sent.' : 'Notification expired — no response.'}
+            </p>
             {arrival.visitorAck && (
               <div className="rounded-md bg-muted px-3 py-2 flex items-start gap-2">
                 <MessageCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
                 <div>
                   <p className="text-xs text-muted-foreground">Visitor's note</p>
                   <p className="text-sm">{arrival.visitorAck}</p>
+                </div>
+              </div>
+            )}
+            {/* Still allow late response in case visitor is still there */}
+            {canRespond && !arrival.visitorAck && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground italic">Visitor may still be waiting. Respond?</p>
+                <div className="space-y-1.5">
+                  {RESPONSE_OPTIONS.map(({ value, label, icon: Icon, color }) => (
+                    <button key={value} type="button"
+                      onClick={() => respondToArrival(buildingId, roomId, arrival.id, value, responderName, responderRole).then(() => toast.success('Response sent')).catch(err => toast.error(String(err)))}
+                      className={cn('flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-colors text-sm', color)}>
+                      <Icon className="h-3.5 w-3.5 shrink-0" />{label}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}

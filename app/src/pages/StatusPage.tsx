@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   CheckCircle2, Clock, BellRing, Package, Utensils, Users, HelpCircle,
-  AlertCircle, MessageCircle, Send,
+  AlertCircle, MessageCircle, Send, Bell,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -75,12 +75,14 @@ function AckPanel({
   roomId,
   arrivalId,
   mode,
+  onFinalAckSent,
 }: {
   arrival: Arrival
   buildingId: string
   roomId: string
   arrivalId: string
   mode: 'responded' | 'no_response'
+  onFinalAckSent?: () => void
 }) {
   const [sent, setSent] = useState(!!arrival.visitorAck)
   const [custom, setCustom] = useState('')
@@ -97,7 +99,7 @@ function AckPanel({
     try {
       await sendVisitorAck(buildingId, roomId, arrivalId, message)
       setSent(true)
-      toast.success('Message sent')
+      if (mode === 'no_response') onFinalAckSent?.()
     } catch (err) {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`)
       setSending(false)
@@ -170,6 +172,7 @@ function AckPanel({
 
 export default function StatusPage() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const buildingId = searchParams.get('b') ?? ''
   const roomId = searchParams.get('r') ?? ''
   const arrivalId = searchParams.get('a') ?? ''
@@ -177,6 +180,7 @@ export default function StatusPage() {
   const [arrival, setArrival] = useState<Arrival | null | undefined>(undefined)
   const [instructions, setInstructions] = useState<{ package: string; food: string; guest: string } | null>(null)
   const [reminderCooldown, setReminderCooldown] = useState(0)
+  const [done, setDone] = useState(false)
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -238,10 +242,35 @@ export default function StatusPage() {
   const TypeIcon = TYPE_ICONS[arrival.type]
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponse = arrival.status === 'responded' && arrival.response
-  // Show "no response" state when:
-  // - Formally expired (Firestore status), OR
-  // - Visitor's chosen wait time has elapsed with no response yet
   const noResponse = !hasResponse && (isExpired || overWait)
+
+  // Done screen — shown after visitor sends final message
+  if (done) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
+        <div className="w-full max-w-md space-y-5 text-center">
+          <div className="flex justify-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+              <CheckCircle2 className="h-8 w-8 text-muted-foreground" />
+            </div>
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">All done</h2>
+            <p className="text-muted-foreground text-sm mt-1">Your message was sent to the resident.</p>
+          </div>
+          <div className="space-y-2">
+            <Button className="w-full" onClick={() => navigate(`/visit?b=${buildingId}`)}>
+              <Bell className="h-4 w-4 mr-2" />
+              Notify another room
+            </Button>
+            <Button variant="ghost" className="w-full text-muted-foreground" onClick={() => window.close()}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
@@ -326,6 +355,7 @@ export default function StatusPage() {
                   roomId={roomId}
                   arrivalId={arrivalId}
                   mode="no_response"
+                  onFinalAckSent={() => setDone(true)}
                 />
               </>
             ) : (
