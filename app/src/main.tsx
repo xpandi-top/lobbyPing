@@ -12,42 +12,7 @@ function normalizeHashRoute() {
   window.history.replaceState(null, '', nextUrl)
 }
 
-function normalizeResidentRoute() {
-  const base = import.meta.env.BASE_URL.replace(/\/$/, '')
-  if (window.location.pathname !== `${base}/resident`) return
-  window.history.replaceState(null, '', `${base}/home${window.location.search}${window.location.hash}`)
-}
-
-function installCurrentPageManifest() {
-  const url = new URL(window.location.href)
-  const startUrl = `${url.pathname}${url.search}`
-  const manifest = {
-    name: 'LobbyPing',
-    short_name: 'LobbyPing',
-    description: 'Privacy-first arrival notification system',
-    start_url: startUrl,
-    scope: '/lobbyPing/',
-    display: 'standalone',
-    orientation: 'portrait',
-    background_color: '#ffffff',
-    theme_color: '#f97316',
-    icons: [
-      { src: '/lobbyPing/icon-light.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/lobbyPing/icon-light.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-    ],
-  }
-  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' })
-  const href = URL.createObjectURL(blob)
-  const existing = document.querySelector<HTMLLinkElement>('link[rel="manifest"]')
-  const link = existing ?? document.createElement('link')
-  link.rel = 'manifest'
-  link.href = href
-  if (!existing) document.head.appendChild(link)
-}
-
 normalizeHashRoute()
-normalizeResidentRoute()
-installCurrentPageManifest()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

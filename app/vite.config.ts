@@ -12,7 +12,31 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icon-light.png', 'icon-dark.png'],
-      manifest: false,
+      manifest: {
+        name: 'LobbyPing',
+        short_name: 'LobbyPing',
+        description: 'Privacy-first arrival notification system',
+        start_url: '/lobbyPing/',
+        theme_color: '#f97316',
+        background_color: '#ffffff',
+        display: 'standalone',
+        orientation: 'portrait',
+        scope: '/lobbyPing/',
+        icons: [
+          {
+            src: 'icon-light.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: 'icon-light.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
+      },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         navigateFallback: '/lobbyPing/index.html',
