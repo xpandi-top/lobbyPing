@@ -3,9 +3,18 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 
+function normalizeHashRoute() {
+  const hash = window.location.hash
+  if (!hash.startsWith('#/')) return
+  const base = import.meta.env.BASE_URL
+  const route = hash.slice(1)
+  const nextUrl = `${base.replace(/\/$/, '')}${route}`
+  window.history.replaceState(null, '', nextUrl)
+}
+
 function installCurrentPageManifest() {
   const url = new URL(window.location.href)
-  const startUrl = `${url.pathname}${url.search}${url.hash}`
+  const startUrl = `${url.pathname}${url.search}`
   const manifest = {
     name: 'LobbyPing',
     short_name: 'LobbyPing',
@@ -30,6 +39,7 @@ function installCurrentPageManifest() {
   if (!existing) document.head.appendChild(link)
 }
 
+normalizeHashRoute()
 installCurrentPageManifest()
 
 createRoot(document.getElementById('root')!).render(

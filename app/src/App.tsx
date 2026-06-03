@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
@@ -45,7 +45,7 @@ export default function App() {
   }
 
   return (
-    <HashRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <div className="min-h-screen bg-background">
         <Routes>
           <Route path="/visit" element={<VisitorPage />} />
@@ -58,6 +58,6 @@ export default function App() {
         </Routes>
       </div>
       <Toaster position="top-center" richColors />
-    </HashRouter>
+    </BrowserRouter>
   )
 }

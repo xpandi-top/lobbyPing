@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { findInviteCode, redeemInviteCode, registerDevice, getBuilding, getRoom } from '@/lib/firestore'
 import { getFCMToken, detectPlatform, isIOS, isInstalledPWA } from '@/lib/fcm'
 import { saveRoom, getSavedRooms, getLastResidentRoom } from '@/lib/storage'
+import { appUrl } from '@/lib/utils'
 
 const schema = z.object({
   buildingId: z.string().min(1, 'Building ID required'),
@@ -33,7 +34,7 @@ export default function JoinPage() {
   const [buildingName, setBuildingName] = useState<string | null>(null)
   const [buildingNotFound, setBuildingNotFound] = useState(false)
   const iosNeedsInstall = isIOS() && !isInstalledPWA()
-  const inviteUrl = `${window.location.origin}${window.location.pathname}#/join?b=${defaultBuilding}&code=${defaultCode}`
+  const inviteUrl = appUrl(`join?b=${defaultBuilding}&code=${defaultCode}`)
   const [savedRooms] = useState(() => getSavedRooms())
 
   useEffect(() => {

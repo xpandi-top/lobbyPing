@@ -23,6 +23,7 @@ import {
   getBuilding,
 } from '@/lib/firestore'
 import type { Building, Room, InviteCode } from '@/lib/types'
+import { appUrl } from '@/lib/utils'
 
 const ADMIN_KEY = import.meta.env.VITE_ADMIN_KEY ?? 'admin'
 
@@ -185,7 +186,7 @@ function RoomCodesPanel({ buildingId, room }: { buildingId: string; room: Room }
   }
 
   function copyInviteLink(ic: InviteCode) {
-    const url = `${window.location.origin}${window.location.pathname}#/join?b=${buildingId}&code=${ic.code}`
+    const url = appUrl(`join?b=${buildingId}&code=${ic.code}`)
     navigator.clipboard.writeText(url)
     toast.success('Invite link copied')
   }
@@ -257,7 +258,7 @@ function BuildingDetail({ building, onBack }: { building: Building; onBack: () =
 
   useEffect(() => {
     listRooms(building.id).then(setRooms)
-    const url = `${window.location.origin}${window.location.pathname}#/visit?b=${building.id}`
+    const url = appUrl(`visit?b=${building.id}`)
     QRCode.toDataURL(url, { width: 512, margin: 2 }).then(setQrDataUrl)
   }, [building.id])
 
@@ -342,7 +343,7 @@ function BuildingDetail({ building, onBack }: { building: Building; onBack: () =
           <div className="flex gap-2">
             <Button variant="outline" onClick={printQR} className="flex-1"><Printer className="h-4 w-4 mr-2" /> Print</Button>
             <Button variant="outline" onClick={() => {
-              const url = `${window.location.origin}${window.location.pathname}#/visit?b=${building.id}`
+              const url = appUrl(`visit?b=${building.id}`)
               navigator.clipboard.writeText(url); toast.success('Visitor link copied')
             }} className="flex-1"><Copy className="h-4 w-4 mr-2" /> Copy Link</Button>
           </div>

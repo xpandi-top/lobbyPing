@@ -40,7 +40,7 @@ self.addEventListener('notificationclick', (event) => {
 
   let url = '/'
   if (buildingId && roomId && arrivalId) {
-    url = `/#/respond?b=${buildingId}&r=${roomId}&a=${arrivalId}`
+    url = `/lobbyPing/respond?b=${buildingId}&r=${roomId}&a=${arrivalId}`
   }
 
   event.waitUntil(

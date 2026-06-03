@@ -48,7 +48,7 @@ import type {
   Room, Device, InviteCode, Arrival, ResidentResponse, ArrivalType,
   DeliveryInstructions,
 } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { appUrl, cn } from '@/lib/utils'
 import { Timestamp } from 'firebase/firestore'
 
 // ── Multi-room selector ────────────────────────────────────────────────────
@@ -594,7 +594,7 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
       const updated = await listInviteCodes(buildingId, roomId)
       setCodes(updated)
       setTransferCode(code)
-      const url = `${window.location.origin}${window.location.pathname}#/join?b=${buildingId}&code=${code}`
+      const url = appUrl(`join?b=${buildingId}&code=${code}`)
       navigator.clipboard.writeText(url)
       toast.success('Transfer link copied to clipboard')
     } catch (err) {
@@ -621,7 +621,7 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
   }
 
   function copyCode(code: string) {
-    const url = `${window.location.origin}${window.location.pathname}#/join?b=${buildingId}&code=${code}`
+    const url = appUrl(`join?b=${buildingId}&code=${code}`)
     navigator.clipboard.writeText(url)
     toast.success('Invite link copied')
   }
@@ -643,7 +643,7 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
             <div className="flex items-center gap-2">
               <span className="font-mono text-lg tracking-widest font-bold">{transferCode}</span>
               <Button variant="ghost" size="icon" onClick={() => {
-                const url = `${window.location.origin}${window.location.pathname}#/join?b=${buildingId}&code=${transferCode}`
+                const url = appUrl(`join?b=${buildingId}&code=${transferCode}`)
                 navigator.clipboard.writeText(url)
                 toast.success('Link copied')
               }}><Copy className="h-3.5 w-3.5" /></Button>

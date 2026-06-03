@@ -48,7 +48,7 @@ export const onArrivalCreated = onDocumentCreated(
     }
 
     const arrivalId = event.params.arrivalId
-    const respondUrl = `https://${process.env.GCLOUD_PROJECT}.web.app/#/respond?b=${buildingId}&r=${roomId}&a=${arrivalId}`
+    const respondUrl = `https://${process.env.GCLOUD_PROJECT}.web.app/lobbyPing/respond?b=${buildingId}&r=${roomId}&a=${arrivalId}`
 
     const message: admin.messaging.MulticastMessage = {
       tokens,
@@ -127,7 +127,7 @@ export const onReminderSent = onDocumentUpdated(
     }
 
     const arrivalId = event.params.arrivalId
-    const respondUrl = `https://${process.env.GCLOUD_PROJECT}.web.app/#/respond?b=${buildingId}&r=${roomId}&a=${arrivalId}`
+    const respondUrl = `https://${process.env.GCLOUD_PROJECT}.web.app/lobbyPing/respond?b=${buildingId}&r=${roomId}&a=${arrivalId}`
 
     await messaging.sendEachForMulticast({
       tokens,
