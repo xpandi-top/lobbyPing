@@ -9,6 +9,15 @@ import ResidentPage from '@/pages/ResidentPage'
 import RespondPage from '@/pages/RespondPage'
 import StatusPage from '@/pages/StatusPage'
 import AdminPage from '@/pages/AdminPage'
+import { getLastResidentRoom } from '@/lib/storage'
+
+function LaunchPage() {
+  const lastRoom = getLastResidentRoom()
+  if (lastRoom) {
+    return <Navigate to={`/resident?b=${lastRoom.buildingId}&r=${lastRoom.roomId}`} replace />
+  }
+  return <Navigate to="/join" replace />
+}
 
 export default function App() {
   const [authReady, setAuthReady] = useState(false)
@@ -45,7 +54,7 @@ export default function App() {
           <Route path="/respond" element={<RespondPage />} />
           <Route path="/status" element={<StatusPage />} />
           <Route path="/admin" element={<AdminPage />} />
-          <Route path="*" element={<Navigate to="/join" replace />} />
+          <Route path="*" element={<LaunchPage />} />
         </Routes>
       </div>
       <Toaster position="top-center" richColors />

@@ -14,7 +14,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { findInviteCode, redeemInviteCode, registerDevice, getBuilding, getRoom } from '@/lib/firestore'
 import { getFCMToken, detectPlatform, isIOS, isInstalledPWA } from '@/lib/fcm'
-import { saveRoom, getSavedRooms } from '@/lib/storage'
+import { saveRoom, getSavedRooms, getLastResidentRoom } from '@/lib/storage'
 
 const schema = z.object({
   buildingId: z.string().min(1, 'Building ID required'),
@@ -37,8 +37,15 @@ export default function JoinPage() {
   const [savedRooms] = useState(() => getSavedRooms())
 
   useEffect(() => {
-    if (defaultBuilding || defaultCode || savedRooms.length !== 1) return
-    navigate(`/resident?b=${savedRooms[0].buildingId}&r=${savedRooms[0].roomId}`, { replace: true })
+    if (defaultBuilding || defaultCode) return
+    const lastRoom = getLastResidentRoom()
+    if (lastRoom) {
+      navigate(`/resident?b=${lastRoom.buildingId}&r=${lastRoom.roomId}`, { replace: true })
+      return
+    }
+    if (savedRooms.length === 1) {
+      navigate(`/resident?b=${savedRooms[0].buildingId}&r=${savedRooms[0].roomId}`, { replace: true })
+    }
   }, [defaultBuilding, defaultCode, navigate, savedRooms])
 
   // If the resident refreshes an invite link after redeeming it, recover from
@@ -154,15 +161,15 @@ export default function JoinPage() {
         {iosNeedsInstall && defaultBuilding && defaultCode && (
           <Card>
             <CardHeader>
-              <CardTitle>Install before registering</CardTitle>
+              <CardTitle>iPhone setup note</CardTitle>
               <CardDescription>iPhone notifications work only from the installed resident app.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-3">
                 {[
-                  { icon: Share, text: 'Tap Share in Safari while this invite page is open' },
-                  { icon: PlusSquare, text: 'Choose Add to Home Screen' },
-                  { icon: Smartphone, text: 'Open LobbyPing from the Home Screen, then register here' },
+                  { icon: Smartphone, text: 'Register this device with your invite code' },
+                  { icon: Share, text: 'On the resident room page, tap Share in Safari' },
+                  { icon: PlusSquare, text: 'Choose Add to Home Screen and open LobbyPing from there' },
                 ].map(({ icon: Icon, text }, index) => (
                   <div key={text} className="flex items-center gap-3">
                     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
@@ -193,7 +200,7 @@ export default function JoinPage() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Do not redeem the code in Safari first. Register after opening the installed app so refresh and notifications work on this device.
+                Add to Home Screen from the resident room page after registration. The installed app will open that room, so you do not need to enter the building ID or invite code again.
               </p>
             </CardContent>
           </Card>
@@ -224,10 +231,8 @@ export default function JoinPage() {
                   className="tracking-widest text-lg h-12 uppercase" {...register('code')} />
                 {errors.code && <p className="text-sm text-destructive">{errors.code.message}</p>}
               </div>
-              <Button type="submit" disabled={loading || (iosNeedsInstall && !!defaultBuilding && !!defaultCode)} className="w-full h-12 text-base">
-                {iosNeedsInstall && defaultBuilding && defaultCode
-                  ? 'Install App First'
-                  : loading ? 'Registering…' : 'Register Device'}
+              <Button type="submit" disabled={loading} className="w-full h-12 text-base">
+                {loading ? 'Registering…' : 'Register Device'}
               </Button>
             </form>
           </CardContent>

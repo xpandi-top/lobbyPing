@@ -41,6 +41,7 @@ import {
   getSavedRoom,
   removeLocalArrival,
   removeSavedRoom,
+  saveLastResidentRoom,
   saveLocalArrivals,
 } from '@/lib/storage'
 import type {
@@ -191,7 +192,7 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
           <div className="space-y-4">
             <Alert><Smartphone className="h-4 w-4" /><AlertDescription>iPhone requires the resident app to be installed before notifications can be enabled.</AlertDescription></Alert>
             <div className="space-y-3">
-              {[{ icon: Share, text: 'Open your resident invite link, then tap Share in Safari' }, { icon: PlusSquare, text: 'Tap "Add to Home Screen"' }, { icon: Smartphone, text: 'Open LobbyPing from the Home Screen to finish setup' }].map(({ icon: Icon, text }, i) => (
+              {[{ icon: Share, text: 'Stay on this resident room page, then tap Share in Safari' }, { icon: PlusSquare, text: 'Tap "Add to Home Screen"' }, { icon: Smartphone, text: 'Open LobbyPing from the Home Screen to finish setup' }].map(({ icon: Icon, text }, i) => (
                 <div key={i} className="flex items-center gap-3">
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">{i + 1}</div>
                   <div className="flex items-center gap-2 text-sm"><Icon className="h-4 w-4 text-muted-foreground" /><span>{text}</span></div>
@@ -241,7 +242,7 @@ function NotificationGuide() {
   const ios = isIOS()
   const permission = 'Notification' in window ? Notification.permission : 'denied'
   const installText = ios
-    ? 'In Safari, use Share, Add to Home Screen, then open LobbyPing from the new app icon.'
+    ? 'From this resident room page in Safari, use Share, Add to Home Screen, then open LobbyPing from the new app icon.'
     : 'Use the browser install option when available, then keep this device signed in.'
 
   const steps = [
@@ -780,6 +781,7 @@ export default function ResidentPage() {
 
   useEffect(() => {
     if (!buildingId || !roomId) { setLoading(false); return }
+    saveLastResidentRoom(buildingId, roomId)
     Promise.all([getRoom(buildingId, roomId), getBuilding(buildingId)]).then(([r, b]) => {
       setRoom(r); if (b) setBuildingName(b.name); setLoading(false)
     })

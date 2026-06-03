@@ -2,6 +2,7 @@ import { Timestamp } from 'firebase/firestore'
 import type { Arrival, SavedRoom } from './types'
 
 const KEY = 'lobbyping_rooms'
+const LAST_RESIDENT_KEY = 'lobbyping_last_resident'
 const ARRIVALS_KEY = 'lobbyping_arrivals'
 const DISMISSED_ARRIVALS_KEY = 'lobbyping_dismissed_arrivals'
 
@@ -27,6 +28,7 @@ export function saveRoom(room: SavedRoom): void {
     rooms.push(room)
   }
   localStorage.setItem(KEY, JSON.stringify(rooms))
+  saveLastResidentRoom(room.buildingId, room.roomId)
 }
 
 export function removeSavedRoom(buildingId: string, roomId: string): void {
@@ -40,6 +42,22 @@ export function getSavedRoom(buildingId: string, roomId: string): SavedRoom | nu
   return getSavedRooms().find(
     (r) => r.roomId === roomId && r.buildingId === buildingId
   ) ?? null
+}
+
+export function saveLastResidentRoom(buildingId: string, roomId: string): void {
+  localStorage.setItem(LAST_RESIDENT_KEY, JSON.stringify({ buildingId, roomId }))
+}
+
+export function getLastResidentRoom(): { buildingId: string; roomId: string } | null {
+  try {
+    const raw = localStorage.getItem(LAST_RESIDENT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { buildingId?: string; roomId?: string }
+    if (!parsed.buildingId || !parsed.roomId) return null
+    return { buildingId: parsed.buildingId, roomId: parsed.roomId }
+  } catch {
+    return null
+  }
 }
 
 type StoredArrival = Omit<Arrival, 'createdAt' | 'expiresAt' | 'visitorAckTime'> & {
