@@ -223,12 +223,13 @@ const TYPE_LABELS: Record<ArrivalType, string> = { package: 'Package', food: 'Fo
 const WAIT_LABELS: Record<string, string> = { '1min': '1 min', '2min': '2 min', '5min': '5 min' }
 const WAIT_MS: Record<string, number> = { '1min': 60_000, '2min': 120_000, '5min': 300_000 }
 
-function useElapsed(createdAtMs: number) {
+function useElapsed(createdAtMs: number, active: boolean) {
   const [elapsed, setElapsed] = useState(Date.now() - createdAtMs)
   useEffect(() => {
+    if (!active) return
     const id = setInterval(() => setElapsed(Date.now() - createdAtMs), 1000)
     return () => clearInterval(id)
-  }, [createdAtMs])
+  }, [createdAtMs, active])
   return elapsed
 }
 
@@ -250,7 +251,9 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
   const [responding, setResponding] = useState(false)
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponded = arrival.status === 'responded'
-  const elapsed = useElapsed(arrival.createdAt.toMillis())
+  // Only tick while pending — freeze on respond/expire
+  const isPending = arrival.status === 'pending'
+  const elapsed = useElapsed(arrival.createdAt.toMillis(), isPending)
   const waitMs = WAIT_MS[arrival.waitTime] ?? 120_000
   const waitProgress = Math.min(100, Math.round((elapsed / waitMs) * 100))
   const overWait = elapsed > waitMs
@@ -272,23 +275,27 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
     <Card className={cn('border-2', isExpired ? 'opacity-60' : hasResponded ? 'border-green-200' : 'border-primary/30 shadow-md')}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <CardTitle className="text-base">{TYPE_LABELS[arrival.type] ?? arrival.type}</CardTitle>
-            {!hasResponded && !isExpired && !isMissed && <Badge variant="default" className="text-xs animate-pulse">Waiting</Badge>}
+            {isPending && !isMissed && <Badge variant="default" className="text-xs animate-pulse">Waiting</Badge>}
             {isMissed && <Badge variant="destructive" className="text-xs">Missed</Badge>}
             {hasResponded && <Badge variant="secondary" className="text-xs">Responded</Badge>}
-            {isExpired && <Badge variant="outline" className="text-xs">Expired</Badge>}
+            {/* Only show Expired if not already responded */}
+            {isExpired && !hasResponded && <Badge variant="outline" className="text-xs">Expired</Badge>}
           </div>
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            {arrival.reminderCount > 0 && <span className="text-orange-500">{arrival.reminderCount}× </span>}
-            <Clock className="h-3 w-3" />
-            <span className={cn('font-mono', overWait && !hasResponded && !isExpired ? 'text-destructive font-semibold' : '')}>
-              {formatElapsed(elapsed)}
-            </span>
-          </div>
+          {/* Only show elapsed timer on pending/missed arrivals */}
+          {(isPending || isMissed) && (
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              {arrival.reminderCount > 0 && <span className="text-orange-500">{arrival.reminderCount}× </span>}
+              <Clock className="h-3 w-3" />
+              <span className={cn('font-mono', overWait ? 'text-destructive font-semibold' : '')}>
+                {formatElapsed(elapsed)}
+              </span>
+            </div>
+          )}
         </div>
-        {/* Wait progress bar — only show while pending */}
-        {!hasResponded && !isExpired && (
+        {/* Wait progress bar — only show while actively pending (not missed/expired/responded) */}
+        {isPending && !isMissed && (
           <div className="mt-2 space-y-0.5">
             <Progress value={waitProgress} className={cn('h-1', overWait ? '[&>div]:bg-destructive' : '')} />
             <p className="text-xs text-muted-foreground">

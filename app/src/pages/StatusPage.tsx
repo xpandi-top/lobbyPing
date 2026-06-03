@@ -50,12 +50,13 @@ const RESPONSE_MESSAGES: Record<ResidentResponse, { title: string; body: string 
 
 // ── Elapsed timer hook ─────────────────────────────────────────────────────
 
-function useElapsed(createdAtMs: number) {
+function useElapsed(createdAtMs: number, active: boolean) {
   const [elapsed, setElapsed] = useState(Date.now() - createdAtMs)
   useEffect(() => {
+    if (!active) return
     const id = setInterval(() => setElapsed(Date.now() - createdAtMs), 1000)
     return () => clearInterval(id)
-  }, [createdAtMs])
+  }, [createdAtMs, active])
   return elapsed
 }
 
@@ -180,7 +181,6 @@ export default function StatusPage() {
   const [arrival, setArrival] = useState<Arrival | null | undefined>(undefined)
   const [instructions, setInstructions] = useState<{ package: string; food: string; guest: string } | null>(null)
   const [reminderCooldown, setReminderCooldown] = useState(0)
-  const [done, setDone] = useState(false)
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -194,7 +194,8 @@ export default function StatusPage() {
   }, [buildingId, roomId])
 
   const createdAtMs = arrival?.createdAt?.toMillis() ?? Date.now()
-  const elapsed = useElapsed(createdAtMs)
+  const isPending = arrival?.status === 'pending'
+  const elapsed = useElapsed(createdAtMs, isPending)
   const waitMs = arrival ? (WAIT_MS[arrival.waitTime] ?? 120_000) : 120_000
   const waitProgress = Math.min(100, Math.round((elapsed / waitMs) * 100))
   const overWait = elapsed > waitMs
@@ -243,9 +244,10 @@ export default function StatusPage() {
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponse = arrival.status === 'responded' && arrival.response
   const noResponse = !hasResponse && (isExpired || overWait)
+  // Show done screen when visitor sent a final message on no-response flow
+  const isDone = noResponse && !!arrival.visitorAck
 
-  // Done screen — shown after visitor sends final message
-  if (done) {
+  if (isDone) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
         <div className="w-full max-w-md space-y-5 text-center">
@@ -284,8 +286,8 @@ export default function StatusPage() {
           </div>
         </div>
 
-        {/* Elapsed timer + progress (always visible) */}
-        <Card>
+        {/* Elapsed timer — only while waiting, hide when done or no-response */}
+        {!noResponse && <Card>
           <CardContent className="pt-4 pb-4 space-y-2">
             <div className="flex items-center justify-between text-sm">
               <div className="flex items-center gap-1.5 text-muted-foreground">
@@ -303,7 +305,7 @@ export default function StatusPage() {
                 : `Expected wait: ${arrival.waitTime.replace('min', ' min')}`}
             </p>
           </CardContent>
-        </Card>
+        </Card>}
 
         {/* Status card */}
         <Card>
@@ -355,7 +357,7 @@ export default function StatusPage() {
                   roomId={roomId}
                   arrivalId={arrivalId}
                   mode="no_response"
-                  onFinalAckSent={() => setDone(true)}
+                  onFinalAckSent={() => { /* isDone now computed reactively */ }}
                 />
               </>
             ) : (
