@@ -450,7 +450,7 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
               ? 'Visitor ring limit reached'
               : ringingVisitor
                 ? 'Ringing…'
-                : 'Ring Visitor'}
+                : 'Ring / Call Visitor'}
         </Button>
         {residentRingCount > 0 && (
           <p className="text-center text-xs text-muted-foreground">

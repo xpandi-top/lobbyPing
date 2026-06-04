@@ -280,6 +280,32 @@ export default function StatusPage() {
     }
   }
 
+  function renderRingResidentButton(ringCount: number) {
+    return (
+      <div className="space-y-2">
+        <Button
+          className="w-full"
+          onClick={handleRingResident}
+          disabled={ringCount >= MAX_RINGS || ringCooldown > 0}
+        >
+          <BellRing className="h-4 w-4 mr-2" />
+          {ringCooldown > 0
+            ? `Ring again in ${ringCooldown}s`
+            : ringCount >= MAX_RINGS
+              ? 'Ring limit reached'
+              : 'Ring / Call Resident'}
+        </Button>
+        {ringCount > 0 && (
+          <div className="flex justify-center">
+            <Badge variant="secondary">
+              {ringCount}/{MAX_RINGS} rings sent
+            </Badge>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   if (arrival === undefined) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center p-4">
@@ -392,6 +418,7 @@ export default function StatusPage() {
                     </Badge>
                   )}
                 </div>
+                {isPending && !isExpired && renderRingResidentButton(ringCount)}
                 <AckPanel
                   arrival={arrival}
                   buildingId={buildingId}
@@ -442,25 +469,7 @@ export default function StatusPage() {
 
                 {/* Reminders */}
                 <div className="space-y-2">
-                  <Button
-                    className="w-full"
-                    onClick={handleRingResident}
-                    disabled={ringCount >= MAX_RINGS || ringCooldown > 0}
-                  >
-                    <BellRing className="h-4 w-4 mr-2" />
-                    {ringCooldown > 0
-                      ? `Ring again in ${ringCooldown}s`
-                      : ringCount >= MAX_RINGS
-                        ? 'Ring limit reached'
-                        : 'Ring Resident'}
-                  </Button>
-                  {ringCount > 0 && (
-                    <div className="flex justify-center">
-                      <Badge variant="secondary">
-                        {ringCount}/{MAX_RINGS} rings sent
-                      </Badge>
-                    </div>
-                  )}
+                  {renderRingResidentButton(ringCount)}
                   <Button
                     variant="outline"
                     className="w-full"
