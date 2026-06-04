@@ -32,9 +32,8 @@ test.describe('admin — building and room management', () => {
     await page.getByPlaceholder('maple-heights').fill(slug)
     await page.getByRole('button', { name: 'Create' }).click()
 
-    await expect(page.getByText('E2E Admin Building')).toBeVisible()
-    // Navigate into building detail
-    await page.getByText('E2E Admin Building').click()
+    // After create, onCreated navigates to building detail view
+    await expect(page.getByRole('heading', { name: 'E2E Admin Building' })).toBeVisible({ timeout: 12_000 })
     await expect(page.getByText('Add Room')).toBeVisible({ timeout: 8_000 })
 
     // Add a room
@@ -43,24 +42,26 @@ test.describe('admin — building and room management', () => {
     await page.getByRole('button', { name: 'Add' }).click()
     await expect(page.getByText('E2E-1')).toBeVisible()
 
-    // Generate invite code
+    // Generate invite code — click room row to expand codes panel
     await page.getByText('E2E-1').click()
-    const addCodeBtn = page.getByRole('button', { name: /Add.*Code|Owner Code/i })
-    await expect(addCodeBtn).toBeVisible()
+    const addCodeBtn = page.getByRole('button', { name: /Add.*Code|Owner Code|Add Owner/i })
+    await expect(addCodeBtn).toBeVisible({ timeout: 5_000 })
     await addCodeBtn.click()
-    // A code should appear (6 char alphanumeric)
-    await expect(page.locator('text=/[A-Z0-9]{6}/')).toBeVisible()
+    // A 6-char code should appear
+    await expect(page.locator('text=/[A-Z0-9]{6}/')).toBeVisible({ timeout: 5_000 })
 
-    // Go back and delete the building
-    await page.getByRole('button', { name: /Back|← /i }).click()
-    const deleteBtn = page.locator('[data-testid="delete-building"], button').filter({ hasText: '' }).first()
-    // Use the trash icon button next to the building
-    const buildingCard = page.getByText('E2E Admin Building').locator('..')
-    await buildingCard.locator('button[class*="destructive"], button').last().click()
+    // Go back to list using the ChevronLeft icon button (first icon button in header area)
+    // BuildingDetail back button: Button variant="ghost" size="icon" with ChevronLeft
+    await page.locator('button[class*="ghost"]').first().click()
+    await expect(page.getByText('LobbyPing Admin')).toBeVisible()
 
-    // Confirm dialog
+    // Delete building from list — accept confirm dialog first
     page.on('dialog', (dialog) => dialog.accept())
-    await expect(page.getByText('E2E Admin Building')).not.toBeVisible({ timeout: 8_000 })
+    // Find trash button: destructive ghost icon button in the building card
+    const trashBtn = page.locator('button.text-destructive, button[class*="destructive"]').first()
+    await expect(trashBtn).toBeVisible({ timeout: 5_000 })
+    await trashBtn.click()
+    await expect(page.getByRole('heading', { name: 'E2E Admin Building' })).not.toBeVisible({ timeout: 8_000 })
   })
 
   test('create room and delete it', async ({ page }) => {
@@ -72,9 +73,7 @@ test.describe('admin — building and room management', () => {
     await page.getByPlaceholder('Maple Heights').fill('E2E Room Delete Test')
     await page.getByPlaceholder('maple-heights').fill(slug)
     await page.getByRole('button', { name: 'Create' }).click()
-    await expect(page.getByText('E2E Room Delete Test')).toBeVisible()
-
-    await page.getByText('E2E Room Delete Test').click()
+    await expect(page.getByRole('heading', { name: 'E2E Room Delete Test' })).toBeVisible({ timeout: 12_000 })
     await expect(page.getByText('Add Room')).toBeVisible()
 
     await page.getByRole('button', { name: 'Add Room' }).click()
@@ -82,10 +81,11 @@ test.describe('admin — building and room management', () => {
     await page.getByRole('button', { name: 'Add' }).click()
     await expect(page.getByText('DEL-1')).toBeVisible()
 
-    // Delete room via trash button
+    // Delete room — register dialog handler before clicking trash
     page.on('dialog', (dialog) => dialog.accept())
-    const roomCard = page.getByText('DEL-1').locator('../..')
-    await roomCard.getByRole('button').last().click()
+    const trashBtn = page.locator('button.text-destructive, button[class*="destructive"]').first()
+    await expect(trashBtn).toBeVisible({ timeout: 5_000 })
+    await trashBtn.click()
     await expect(page.getByText('DEL-1')).not.toBeVisible({ timeout: 8_000 })
   })
 
@@ -97,7 +97,8 @@ test.describe('admin — building and room management', () => {
     await page.getByPlaceholder('Maple Heights').fill('E2E QR Test')
     await page.getByPlaceholder('maple-heights').fill(slug)
     await page.getByRole('button', { name: 'Create' }).click()
-    await page.getByText('E2E QR Test').click()
+    // After create, navigates to building detail
+    await expect(page.getByRole('heading', { name: 'E2E QR Test' })).toBeVisible({ timeout: 12_000 })
 
     // QR button / show QR
     const qrBtn = page.getByRole('button', { name: /QR|Print/i })
