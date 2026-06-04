@@ -13,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { subscribeArrival, sendReminder, getRoom, sendVisitorAck, ringResident } from '@/lib/firestore'
 import { triggerPush } from '@/lib/notify'
-import { playRingAlert } from '@/lib/ring'
+import { playRingAlarm } from '@/lib/ring'
 import type { Arrival, ResidentResponse, ArrivalType } from '@/lib/types'
 
 const MAX_REMINDERS = 3
@@ -213,10 +213,10 @@ export default function StatusPage() {
       return
     }
     if (count > seenResidentRingCount.current && lastRingByForAlert === 'resident') {
-      playRingAlert().then((played) => {
+      playRingAlarm().then((played) => {
         const message = played
-          ? 'Resident is ringing you'
-          : 'Resident is ringing you — tap a button to enable sound'
+          ? 'Resident alarm is ringing'
+          : 'Resident is ringing you — tap a button to enable alarm sound'
         setVisitorRingNotice(message)
         toast.info(message)
       })

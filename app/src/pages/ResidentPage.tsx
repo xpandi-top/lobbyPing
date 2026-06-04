@@ -34,7 +34,7 @@ import {
   setupForegroundMessaging, isIOS, isInstalledPWA,
 } from '@/lib/fcm'
 import { triggerPush } from '@/lib/notify'
-import { playRingAlert } from '@/lib/ring'
+import { playRingAlarm, primeRingAudio } from '@/lib/ring'
 import {
   getDismissedArrivalIds,
   getLocalArrivals,
@@ -376,10 +376,10 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
       return
     }
     if (count > seenVisitorRingCount.current && arrival.lastRingBy === 'visitor') {
-      playRingAlert().then((played) => {
+      playRingAlarm().then((played) => {
         const message = played
-          ? 'Visitor is ringing'
-          : 'Visitor is ringing — tap a button to enable sound'
+          ? 'Visitor alarm is ringing'
+          : 'Visitor is ringing — tap anywhere to enable alarm sound'
         setRingNotice(message)
         toast.info(message)
       })
@@ -593,6 +593,7 @@ function ActiveArrivals({ buildingId, roomId, canRespond, responderName, respond
   responderDeviceId?: string
 }) {
   const [arrivals, setArrivals] = useState<Arrival[]>(() => getLocalArrivals(buildingId, roomId))
+  const seenArrivalIds = useRef<Set<string> | null>(null)
 
   useEffect(() => {
     if (!buildingId || !roomId) return
@@ -604,6 +605,22 @@ function ActiveArrivals({ buildingId, roomId, canRespond, responderName, respond
       const liveArrivals = snap.docs
         .map(d => ({ id: d.id, ...d.data() }) as Arrival)
         .filter((arrival) => !dismissed.has(arrival.id))
+
+      const pendingIds = new Set(liveArrivals.filter((arrival) => arrival.status === 'pending').map((arrival) => arrival.id))
+      if (seenArrivalIds.current === null) {
+        seenArrivalIds.current = pendingIds
+      } else {
+        const hasNewArrival = [...pendingIds].some((id) => !seenArrivalIds.current?.has(id))
+        if (hasNewArrival) {
+          playRingAlarm().then((played) => {
+            const message = played
+              ? 'Visitor alarm is ringing'
+              : 'Visitor arrived — tap anywhere to enable alarm sound'
+            toast.info(message)
+          })
+        }
+        seenArrivalIds.current = pendingIds
+      }
       setArrivals(saveLocalArrivals(buildingId, roomId, liveArrivals))
     })
   }, [buildingId, roomId])
@@ -912,6 +929,16 @@ export default function ResidentPage() {
       setRoom(r); if (b) setBuildingName(b.name); setLoading(false)
     })
   }, [buildingId, roomId])
+
+  useEffect(() => {
+    const unlock = () => { void primeRingAudio() }
+    window.addEventListener('pointerdown', unlock, { passive: true })
+    window.addEventListener('keydown', unlock)
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+  }, [])
 
   // Refresh FCM token on every page load so stale tokens (e.g. after SW update) get replaced.
   // Must run at this level — SetupWizard only mounts when Alerts tab is active.
