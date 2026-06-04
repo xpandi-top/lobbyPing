@@ -491,58 +491,10 @@ function ActiveArrivals({ buildingId, roomId, canRespond, responderName, respond
 
   useEffect(() => {
     if (!buildingId || !roomId) return
-
-    async function showArrivalNotification(arrival: Arrival, isReminder = false) {
-      if (!('Notification' in window) || Notification.permission !== 'granted') return
-      try {
-        const reg = await navigator.serviceWorker.ready
-        const typeLabel: Record<string, string> = { package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Visitor' }
-        const waitLabel: Record<string, string> = { '1min': '1 min', '2min': '2 min', '5min': '5 min' }
-        const title = isReminder
-          ? `Reminder — ${typeLabel[arrival.type] ?? 'Visitor'} waiting`
-          : `${typeLabel[arrival.type] ?? 'Visitor'} — Room ${arrival.roomNumber}`
-        await reg.showNotification(title, {
-          body: isReminder
-            ? 'Still waiting downstairs. Tap to respond.'
-            : `Waiting up to ${waitLabel[arrival.waitTime] ?? arrival.waitTime}. Tap to respond.`,
-          icon: `${import.meta.env.BASE_URL}icon-light.png`,
-          badge: `${import.meta.env.BASE_URL}icon-light.png`,
-          data: { buildingId, roomId, arrivalId: arrival.id },
-        })
-      } catch (err) {
-        console.error('[Notify] showArrivalNotification failed:', err)
-      }
-    }
-
     // Include 'expired' so arrivals with visitor notes stay visible until Cloud Function cleans them up (30min)
     const q = query(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'), where('status', 'in', ['pending', 'responded', 'expired']))
-    let initialLoadDone = false
-    const prevReminderCount = new Map<string, number>()
-
     return onSnapshot(q, (snap) => {
       const dismissed = getDismissedArrivalIds(buildingId, roomId)
-
-      if (initialLoadDone) {
-        snap.docChanges().forEach((change) => {
-          const arrival = { id: change.doc.id, ...change.doc.data() } as Arrival
-          if (dismissed.has(arrival.id)) return
-          if (change.type === 'added' && arrival.status === 'pending') {
-            showArrivalNotification(arrival)
-          } else if (change.type === 'modified') {
-            const prev = prevReminderCount.get(arrival.id) ?? 0
-            if (arrival.reminderCount > prev && arrival.status === 'pending') {
-              showArrivalNotification(arrival, true)
-            }
-          }
-        })
-      }
-      initialLoadDone = true
-
-      // Update reminder count tracking
-      snap.docs.forEach((d) => {
-        const data = d.data()
-        prevReminderCount.set(d.id, data.reminderCount ?? 0)
-      })
 
       const liveArrivals = snap.docs
         .map(d => ({ id: d.id, ...d.data() }) as Arrival)
@@ -864,6 +816,76 @@ export default function ResidentPage() {
       .then((token) => token ? updateDeviceFCMToken(buildingId, roomId, savedRoom.deviceId, token) : undefined)
       .catch((err) => console.error('[Alerts] refresh token failed:', err))
   }, [buildingId, roomId, savedRoom?.deviceId])
+
+  // Arrival notification listener at page level so it survives tab switches.
+  // Radix UI Tabs unmounts inactive content, so we can't rely on the ActiveArrivals listener.
+  useEffect(() => {
+    if (!buildingId || !roomId) return
+    if (!('Notification' in window) || Notification.permission !== 'granted') return
+
+    const TYPE_LABEL: Record<string, string> = { package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Visitor' }
+    const WAIT_LABEL: Record<string, string> = { '1min': '1 min', '2min': '2 min', '5min': '5 min' }
+    const BASE = import.meta.env.BASE_URL
+
+    async function notify(title: string, body: string, arrivalId: string) {
+      // SW-based notification (required for iOS; 3s timeout in case SW isn't ready)
+      if ('serviceWorker' in navigator) {
+        try {
+          const reg = await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+          ])
+          if (reg) {
+            await reg.showNotification(title, {
+              body,
+              icon: `${BASE}icon-light.png`,
+              badge: `${BASE}icon-light.png`,
+              data: { buildingId, roomId, arrivalId },
+            })
+            return
+          }
+        } catch (e) {
+          console.warn('[Notify] SW showNotification failed:', e)
+        }
+      }
+      // Fallback: Notification API directly (Chrome/Firefox desktop)
+      try { new Notification(title, { body, icon: `${BASE}icon-light.png` }) } catch (e) {
+        console.error('[Notify] All notification methods failed:', e)
+      }
+    }
+
+    const q = query(
+      collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'),
+      where('status', '==', 'pending'),
+    )
+    let initialLoadDone = false
+    const prevReminder = new Map<string, number>()
+
+    return onSnapshot(q, (snap) => {
+      if (!initialLoadDone) {
+        initialLoadDone = true
+        snap.docs.forEach((d) => prevReminder.set(d.id, d.data().reminderCount ?? 0))
+        return
+      }
+      snap.docChanges().forEach((change) => {
+        const d = change.doc.data()
+        const id = change.doc.id
+        if (change.type === 'added') {
+          notify(
+            `${TYPE_LABEL[d.type] ?? 'Visitor'} — Room ${d.roomNumber}`,
+            `Waiting up to ${WAIT_LABEL[d.waitTime] ?? d.waitTime}. Tap to respond.`,
+            id,
+          )
+        } else if (change.type === 'modified') {
+          const prev = prevReminder.get(id) ?? 0
+          if ((d.reminderCount ?? 0) > prev) {
+            notify(`Reminder — ${TYPE_LABEL[d.type] ?? 'Visitor'} waiting`, 'Still waiting downstairs.', id)
+          }
+        }
+        prevReminder.set(id, d.reminderCount ?? 0)
+      })
+    })
+  }, [buildingId, roomId])
 
   // Show system notification popup when FCM message arrives while app is foregrounded.
   // Without this, FCM bypasses the SW on foreground and nothing shows.
