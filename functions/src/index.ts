@@ -32,8 +32,13 @@ export const onArrivalCreated = onDocumentCreated(
 
     if (deviceSnap.empty) return
 
-    const tokens = deviceSnap.docs.map((d) => d.data().fcmToken as string).filter(Boolean)
-    if (!tokens.length) return
+    // Keep doc reference alongside token so index alignment is correct after filtering
+    const validDevices = deviceSnap.docs
+      .map((doc) => ({ doc, token: doc.data().fcmToken as string }))
+      .filter(({ token }) => token && !token.startsWith('no-token-'))
+    if (!validDevices.length) return
+
+    const tokens = validDevices.map((d) => d.token)
 
     const typeLabel: Record<string, string> = {
       package: 'Package',
@@ -78,15 +83,18 @@ export const onArrivalCreated = onDocumentCreated(
 
     const response = await messaging.sendEachForMulticast(message)
 
-    // Remove stale tokens
-    const staleTokenDocs: Promise<admin.firestore.WriteResult>[] = []
+    const STALE_CODES = new Set([
+      'messaging/registration-token-not-registered',
+      'messaging/invalid-registration-token',
+      'messaging/invalid-argument',
+    ])
+    const staleWrites: Promise<admin.firestore.WriteResult>[] = []
     response.responses.forEach((r, i) => {
-      if (!r.success && r.error?.code === 'messaging/registration-token-not-registered') {
-        const tokenDoc = deviceSnap.docs[i]
-        staleTokenDocs.push(tokenDoc.ref.delete())
+      if (!r.success && r.error?.code && STALE_CODES.has(r.error.code)) {
+        staleWrites.push(validDevices[i].doc.ref.delete())
       }
     })
-    await Promise.allSettled(staleTokenDocs)
+    await Promise.allSettled(staleWrites)
   }
 )
 
@@ -116,7 +124,9 @@ export const onReminderSent = onDocumentUpdated(
       .collection('devices')
       .get()
 
-    const tokens = deviceSnap.docs.map((d) => d.data().fcmToken as string).filter(Boolean)
+    const tokens = deviceSnap.docs
+      .map((d) => d.data().fcmToken as string)
+      .filter((t) => t && !t.startsWith('no-token-'))
     if (!tokens.length) return
 
     const typeLabel: Record<string, string> = {

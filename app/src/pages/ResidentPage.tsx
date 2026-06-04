@@ -106,12 +106,7 @@ function SetupWizard({ buildingId, roomId }: { buildingId: string; roomId: strin
   const stepIndex = steps.indexOf(step)
   const progress = step === 'done' ? 100 : Math.max(0, Math.round((stepIndex / (steps.length - 1)) * 100))
 
-  useEffect(() => {
-    if (!savedRoom || !notificationSupported || Notification.permission !== 'granted') return
-    getFCMToken()
-      .then((token) => token ? updateDeviceFCMToken(buildingId, roomId, savedRoom.deviceId, token) : undefined)
-      .catch((err) => console.error('[Alerts] refresh token failed:', err))
-  }, [buildingId, notificationSupported, roomId, savedRoom?.deviceId])
+  // Token refresh moved to ResidentPage so it runs on any tab, not just Alerts
 
   async function handleEnable() {
     if (!savedRoom) {
@@ -811,6 +806,15 @@ export default function ResidentPage() {
       setRoom(r); if (b) setBuildingName(b.name); setLoading(false)
     })
   }, [buildingId, roomId])
+
+  // Refresh FCM token on every page load so stale tokens (e.g. after SW update) get replaced.
+  // Must run at this level — SetupWizard only mounts when Alerts tab is active.
+  useEffect(() => {
+    if (!savedRoom || !('Notification' in window) || Notification.permission !== 'granted') return
+    getFCMToken()
+      .then((token) => token ? updateDeviceFCMToken(buildingId, roomId, savedRoom.deviceId, token) : undefined)
+      .catch((err) => console.error('[Alerts] refresh token failed:', err))
+  }, [buildingId, roomId, savedRoom?.deviceId])
 
   // Show system notification popup when FCM message arrives while app is foregrounded.
   // Without this, FCM bypasses the SW on foreground and nothing shows.
