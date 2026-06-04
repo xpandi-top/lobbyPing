@@ -6,7 +6,7 @@ export async function triggerPush(
   buildingId: string,
   roomId: string,
   arrivalId: string,
-  kind: 'arrival' | 'reminder' | 'responded',
+  kind: 'arrival' | 'reminder' | 'responded' | 'ring',
   excludeDeviceId?: string,
 ): Promise<void> {
   if (!NOTIFY_URL) {

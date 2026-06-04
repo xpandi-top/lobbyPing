@@ -71,6 +71,26 @@ service cloud.firestore {
                 request.resource.data.reminderCount == resource.data.reminderCount + 1 &&
                 resource.data.status == 'pending'
               ) ||
+              // Visitor rings resident
+              (
+                request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['ringCount','lastRingAt','lastRingBy']) &&
+                request.resource.data.ringCount <= 3 &&
+                request.resource.data.ringCount == resource.data.ringCount + 1 &&
+                request.resource.data.lastRingBy == 'visitor' &&
+                request.resource.data.lastRingAt == request.time &&
+                resource.data.status == 'pending'
+              ) ||
+              // Resident rings visitor while visitor status page is open
+              (
+                request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['residentRingCount','lastResidentRingAt','lastRingBy']) &&
+                request.resource.data.residentRingCount <= 3 &&
+                request.resource.data.residentRingCount == resource.data.residentRingCount + 1 &&
+                request.resource.data.lastRingBy == 'resident' &&
+                request.resource.data.lastResidentRingAt == request.time &&
+                resource.data.status in ['pending','responded']
+              ) ||
               // Response (resident)
               (
                 request.resource.data.diff(resource.data).affectedKeys()

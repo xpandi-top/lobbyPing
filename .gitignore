@@ -11,3 +11,4 @@ app/.env.local
 .firebase/
 *.log
 .DS_Store
+.vercel

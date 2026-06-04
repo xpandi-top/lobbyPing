@@ -46,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { buildingId, roomId, arrivalId, kind, excludeDeviceId } = (req.body ?? {}) as {
       buildingId?: string; roomId?: string; arrivalId?: string
-      kind?: 'arrival' | 'reminder' | 'responded'
+      kind?: 'arrival' | 'reminder' | 'responded' | 'ring'
       excludeDeviceId?: string
     }
     if (!buildingId || !roomId || !arrivalId) {
@@ -64,6 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const isReminder = kind === 'reminder'
     const isResponded = kind === 'responded'
+    const isRing = kind === 'ring'
 
     // Anti-abuse: arrival/reminder only fire on a recent, still-pending arrival.
     // 'responded' fires after status flips to responded, so it's gated differently.
@@ -73,8 +74,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (arrival.status !== 'responded') return res.status(200).json({ skipped: 'not responded' })
     } else {
       if (arrival.status !== 'pending') return res.status(200).json({ skipped: 'not pending' })
-      if (!isReminder && ageMs > 120_000) {
+      if (!isReminder && !isRing && ageMs > 120_000) {
         return res.status(200).json({ skipped: 'arrival too old for initial notify' })
+      }
+      if (isRing && ageMs > 30 * 60_000) {
+        return res.status(200).json({ skipped: 'arrival too old for ring' })
       }
     }
 
@@ -100,6 +104,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const who = (arrival.respondedByName as string) || 'Someone'
       title = `Room ${roomNumber} — handled`
       body = `${who}: ${RESPONSE_LABEL[arrival.response as string] ?? 'Responded'}`
+    } else if (isRing) {
+      title = `Ring — Room ${roomNumber}`
+      body = 'Visitor is trying to reach you. Tap to respond.'
     } else if (isReminder) {
       title = `Reminder — ${TYPE_LABEL[type] ?? 'Visitor'} in Room ${roomNumber}`
       body = 'Still waiting downstairs. Tap to respond.'

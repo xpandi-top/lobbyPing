@@ -5,6 +5,7 @@ export type WaitTime = '1min' | '2min' | '5min'
 export type ArrivalStatus = 'pending' | 'responded' | 'expired'
 export type ResidentResponse = 'coming_down' | 'leave_in_lobby' | 'no_need_to_wait'
 export type UserRole = 'owner' | 'member'
+export type RingBy = 'visitor' | 'resident'
 
 export interface Building {
   id: string
@@ -78,6 +79,11 @@ export interface Arrival {
   visitorAck: string | null        // visitor's acknowledgment after resident responds (or final msg)
   visitorAckTime: Timestamp | null
   reminderCount: number
+  ringCount: number
+  lastRingAt: Timestamp | null
+  lastRingBy: RingBy | null
+  residentRingCount: number
+  lastResidentRingAt: Timestamp | null
   createdAt: Timestamp
   expiresAt: Timestamp
 }

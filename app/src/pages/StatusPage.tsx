@@ -11,12 +11,15 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
-import { subscribeArrival, sendReminder, getRoom, sendVisitorAck } from '@/lib/firestore'
+import { subscribeArrival, sendReminder, getRoom, sendVisitorAck, ringResident } from '@/lib/firestore'
 import { triggerPush } from '@/lib/notify'
+import { playRingAlert } from '@/lib/ring'
 import type { Arrival, ResidentResponse, ArrivalType } from '@/lib/types'
 
 const MAX_REMINDERS = 3
 const REMINDER_COOLDOWN_MS = 30_000
+const MAX_RINGS = 3
+const RING_COOLDOWN_MS = 20_000
 
 const TYPE_LABELS: Record<ArrivalType, string> = {
   package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Other',
@@ -183,8 +186,14 @@ export default function StatusPage() {
   const [arrival, setArrival] = useState<Arrival | null | undefined>(undefined)
   const [instructions, setInstructions] = useState<{ package: string; food: string; guest: string } | null>(null)
   const [reminderCooldown, setReminderCooldown] = useState(0)
+  const [ringCooldown, setRingCooldown] = useState(0)
   const [ackSent, setAckSent] = useState(false)
+  const [visitorRingNotice, setVisitorRingNotice] = useState('')
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const ringCooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const seenResidentRingCount = useRef<number | null>(null)
+  const residentRingCountForAlert = arrival?.residentRingCount ?? null
+  const lastRingByForAlert = arrival?.lastRingBy ?? null
 
   useEffect(() => {
     if (!buildingId || !roomId || !arrivalId) return
@@ -196,6 +205,32 @@ export default function StatusPage() {
     getRoom(buildingId, roomId).then((r) => { if (r) setInstructions(r.instructions) })
   }, [buildingId, roomId])
 
+  useEffect(() => {
+    if (residentRingCountForAlert === null) return
+    const count = residentRingCountForAlert
+    if (seenResidentRingCount.current === null) {
+      seenResidentRingCount.current = count
+      return
+    }
+    if (count > seenResidentRingCount.current && lastRingByForAlert === 'resident') {
+      playRingAlert().then((played) => {
+        const message = played
+          ? 'Resident is ringing you'
+          : 'Resident is ringing you — tap a button to enable sound'
+        setVisitorRingNotice(message)
+        toast.info(message)
+      })
+    }
+    seenResidentRingCount.current = count
+  }, [residentRingCountForAlert, lastRingByForAlert])
+
+  useEffect(() => {
+    return () => {
+      if (cooldownRef.current) clearInterval(cooldownRef.current)
+      if (ringCooldownRef.current) clearInterval(ringCooldownRef.current)
+    }
+  }, [])
+
   const createdAtMs = arrival?.createdAt?.toMillis() ?? Date.now()
   const isPending = arrival?.status === 'pending'
   const elapsed = useElapsed(createdAtMs, isPending)
@@ -204,10 +239,22 @@ export default function StatusPage() {
   const overWait = elapsed > waitMs
 
   function startCooldown() {
+    if (cooldownRef.current) clearInterval(cooldownRef.current)
     setReminderCooldown(REMINDER_COOLDOWN_MS / 1000)
     cooldownRef.current = setInterval(() => {
       setReminderCooldown((prev) => {
         if (prev <= 1) { clearInterval(cooldownRef.current!); return 0 }
+        return prev - 1
+      })
+    }, 1000)
+  }
+
+  function startRingCooldown() {
+    if (ringCooldownRef.current) clearInterval(ringCooldownRef.current)
+    setRingCooldown(RING_COOLDOWN_MS / 1000)
+    ringCooldownRef.current = setInterval(() => {
+      setRingCooldown((prev) => {
+        if (prev <= 1) { clearInterval(ringCooldownRef.current!); return 0 }
         return prev - 1
       })
     }, 1000)
@@ -219,6 +266,18 @@ export default function StatusPage() {
     triggerPush(buildingId, roomId, arrivalId, 'reminder')
     toast.success('Reminder sent')
     startCooldown()
+  }
+
+  async function handleRingResident() {
+    if (!arrival || arrival.status !== 'pending' || (arrival.ringCount ?? 0) >= MAX_RINGS || ringCooldown > 0) return
+    try {
+      await ringResident(buildingId, roomId, arrivalId, arrival.ringCount ?? 0)
+      triggerPush(buildingId, roomId, arrivalId, 'ring')
+      toast.success('Resident ring sent')
+      startRingCooldown()
+    } catch (err) {
+      toast.error(`Ring failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   if (arrival === undefined) {
@@ -248,6 +307,7 @@ export default function StatusPage() {
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponse = arrival.status === 'responded' && arrival.response
   const noResponse = !hasResponse && (isExpired || overWait)
+  const ringCount = arrival.ringCount ?? 0
   // Done once the visitor acknowledges, for both resident-response and no-response flows.
   // ackSent closes immediately while visitorAck covers page reloads after the write lands.
   const isDone = ackSent || !!arrival.visitorAck
@@ -312,6 +372,14 @@ export default function StatusPage() {
         {/* Status card */}
         <Card>
           <CardContent className="pt-6 space-y-4">
+            {visitorRingNotice && (
+              <div className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-medium text-primary">
+                <div className="flex items-center gap-2">
+                  <BellRing className="h-4 w-4 shrink-0" />
+                  <span>{visitorRingNotice}</span>
+                </div>
+              </div>
+            )}
             {hasResponse ? (
               <>
                 <div className="text-center space-y-2">
@@ -374,6 +442,25 @@ export default function StatusPage() {
 
                 {/* Reminders */}
                 <div className="space-y-2">
+                  <Button
+                    className="w-full"
+                    onClick={handleRingResident}
+                    disabled={ringCount >= MAX_RINGS || ringCooldown > 0}
+                  >
+                    <BellRing className="h-4 w-4 mr-2" />
+                    {ringCooldown > 0
+                      ? `Ring again in ${ringCooldown}s`
+                      : ringCount >= MAX_RINGS
+                        ? 'Ring limit reached'
+                        : 'Ring Resident'}
+                  </Button>
+                  {ringCount > 0 && (
+                    <div className="flex justify-center">
+                      <Badge variant="secondary">
+                        {ringCount}/{MAX_RINGS} rings sent
+                      </Badge>
+                    </div>
+                  )}
                   <Button
                     variant="outline"
                     className="w-full"

@@ -277,7 +277,10 @@ export async function createArrival(
     status: 'pending', response: null,
     respondedByName: null, respondedByRole: null,
     visitorAck: null, visitorAckTime: null,
-    reminderCount: 0, createdAt: now, expiresAt,
+    reminderCount: 0,
+    ringCount: 0, lastRingAt: null, lastRingBy: null,
+    residentRingCount: 0, lastResidentRingAt: null,
+    createdAt: now, expiresAt,
   })
   return ref.id
 }
@@ -349,5 +352,37 @@ export async function sendReminder(
   await updateDoc(
     doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
     { reminderCount: currentCount + 1 }
+  )
+}
+
+export async function ringResident(
+  buildingId: string,
+  roomId: string,
+  arrivalId: string,
+  currentRingCount: number
+): Promise<void> {
+  await updateDoc(
+    doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
+    {
+      ringCount: currentRingCount + 1,
+      lastRingAt: serverTimestamp(),
+      lastRingBy: 'visitor',
+    }
+  )
+}
+
+export async function ringVisitor(
+  buildingId: string,
+  roomId: string,
+  arrivalId: string,
+  currentResidentRingCount: number
+): Promise<void> {
+  await updateDoc(
+    doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
+    {
+      residentRingCount: currentResidentRingCount + 1,
+      lastResidentRingAt: serverTimestamp(),
+      lastRingBy: 'resident',
+    }
   )
 }

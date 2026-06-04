@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -27,13 +27,14 @@ import {
   getRoom, getBuilding,
   updateDeviceFCMToken, updateInstructions, respondToArrival,
   createInviteCode, listInviteCodes, deleteInviteCode,
-  listDevices, removeDevice,
+  listDevices, removeDevice, ringVisitor,
 } from '@/lib/firestore'
 import {
   requestNotificationPermission, getFCMToken, sendTestNotification,
   setupForegroundMessaging, isIOS, isInstalledPWA,
 } from '@/lib/fcm'
 import { triggerPush } from '@/lib/notify'
+import { playRingAlert } from '@/lib/ring'
 import {
   getDismissedArrivalIds,
   getLocalArrivals,
@@ -319,6 +320,8 @@ function NotificationGuide() {
 const TYPE_LABELS: Record<ArrivalType, string> = { package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Other' }
 const WAIT_LABELS: Record<string, string> = { '1min': '1 min', '2min': '2 min', '5min': '5 min' }
 const WAIT_MS: Record<string, number> = { '1min': 60_000, '2min': 120_000, '5min': 300_000 }
+const MAX_RINGS = 3
+const RING_COOLDOWN_MS = 20_000
 
 function useElapsed(createdAtMs: number, active: boolean) {
   const [elapsed, setElapsed] = useState(Date.now() - createdAtMs)
@@ -348,6 +351,11 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
   onRemove: (arrivalId: string) => void
 }) {
   const [responding, setResponding] = useState(false)
+  const [ringingVisitor, setRingingVisitor] = useState(false)
+  const [ringCooldown, setRingCooldown] = useState(0)
+  const [ringNotice, setRingNotice] = useState('')
+  const ringCooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const seenVisitorRingCount = useRef<number | null>(null)
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
   const hasResponded = arrival.status === 'responded'
   // Only tick while pending — freeze on respond/expire
@@ -357,6 +365,44 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
   const waitProgress = Math.min(100, Math.round((elapsed / waitMs) * 100))
   const overWait = elapsed > waitMs
   const isMissed = !hasResponded && !isExpired && overWait
+  const visitorRingCount = arrival.ringCount ?? 0
+  const residentRingCount = arrival.residentRingCount ?? 0
+  const canRingVisitor = canRespond && !arrival.visitorAck && (arrival.status === 'pending' || hasResponded)
+
+  useEffect(() => {
+    const count = arrival.ringCount ?? 0
+    if (seenVisitorRingCount.current === null) {
+      seenVisitorRingCount.current = count
+      return
+    }
+    if (count > seenVisitorRingCount.current && arrival.lastRingBy === 'visitor') {
+      playRingAlert().then((played) => {
+        const message = played
+          ? 'Visitor is ringing'
+          : 'Visitor is ringing — tap a button to enable sound'
+        setRingNotice(message)
+        toast.info(message)
+      })
+    }
+    seenVisitorRingCount.current = count
+  }, [arrival.ringCount, arrival.lastRingBy])
+
+  useEffect(() => {
+    return () => {
+      if (ringCooldownRef.current) clearInterval(ringCooldownRef.current)
+    }
+  }, [])
+
+  function startRingCooldown() {
+    if (ringCooldownRef.current) clearInterval(ringCooldownRef.current)
+    setRingCooldown(RING_COOLDOWN_MS / 1000)
+    ringCooldownRef.current = setInterval(() => {
+      setRingCooldown((prev) => {
+        if (prev <= 1) { clearInterval(ringCooldownRef.current!); return 0 }
+        return prev - 1
+      })
+    }, 1000)
+  }
 
   async function handleResponse(response: ResidentResponse) {
     if (responding || !canRespond) return
@@ -370,6 +416,49 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`)
       setResponding(false)
     }
+  }
+
+  async function handleRingVisitor() {
+    if (!canRingVisitor || ringingVisitor || residentRingCount >= MAX_RINGS || ringCooldown > 0) return
+    setRingingVisitor(true)
+    try {
+      await ringVisitor(buildingId, roomId, arrival.id, residentRingCount)
+      toast.success('Visitor ring sent')
+      startRingCooldown()
+    } catch (err) {
+      toast.error(`Ring failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setRingingVisitor(false)
+    }
+  }
+
+  function renderRingVisitorButton() {
+    if (!canRingVisitor) return null
+    return (
+      <div className="space-y-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={handleRingVisitor}
+          disabled={ringingVisitor || residentRingCount >= MAX_RINGS || ringCooldown > 0}
+        >
+          <BellRing className="h-4 w-4 mr-2" />
+          {ringCooldown > 0
+            ? `Ring again in ${ringCooldown}s`
+            : residentRingCount >= MAX_RINGS
+              ? 'Visitor ring limit reached'
+              : ringingVisitor
+                ? 'Ringing…'
+                : 'Ring Visitor'}
+        </Button>
+        {residentRingCount > 0 && (
+          <p className="text-center text-xs text-muted-foreground">
+            {residentRingCount}/{MAX_RINGS} visitor rings sent
+          </p>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -417,6 +506,14 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
         )}
       </CardHeader>
       <CardContent>
+        {(ringNotice || visitorRingCount > 0) && (
+          <div className="mb-3 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">
+            <div className="flex items-center gap-2">
+              <BellRing className="h-4 w-4 shrink-0" />
+              <span className="font-medium">{ringNotice || `Visitor rang ${visitorRingCount} time${visitorRingCount === 1 ? '' : 's'}`}</span>
+            </div>
+          </div>
+        )}
         {hasResponded ? (
           <div className="space-y-2">
             <div className="space-y-0.5">
@@ -439,6 +536,7 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
                 </div>
               </div>
             )}
+            {renderRingVisitorButton()}
           </div>
         ) : isMissed || isExpired ? (
           <div className="space-y-2">
@@ -469,9 +567,11 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
                 </div>
               </div>
             )}
+            {!isExpired && renderRingVisitorButton()}
           </div>
         ) : canRespond ? (
           <div className="space-y-2">
+            {renderRingVisitorButton()}
             {RESPONSE_OPTIONS.map(({ value, label, icon: Icon, color }) => (
               <button key={value} type="button" onClick={() => handleResponse(value)} disabled={responding}
                 className={cn('flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-50', color)}>

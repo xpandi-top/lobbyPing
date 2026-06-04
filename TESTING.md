@@ -88,16 +88,23 @@ Back in Tab C (Status page) — response appears automatically via Firestore rea
 
 ---
 
-## Deploy Cloud Functions (for real push notifications)
+## Deploy Rules + Vercel API
 
 ```bash
 cd /Users/dimo/projects/lobbyPing
-firebase login
-firebase use lobbyping-5ae0f
-firebase deploy --only functions,firestore
+npm run deploy:check   # verify Firebase/Vercel CLIs and auth
+npm run deploy         # deploy Firestore rules, then Vercel API
 ```
 
-After deploy, push notifications fire automatically when visitor sends an arrival.
+Targeted deploys:
+
+```bash
+npm run deploy:rules   # Firestore rules only
+npm run deploy:api     # Vercel API only
+```
+
+Defaults: `FIREBASE_PROJECT=lobbyping-5ae0f` and `VERCEL_PROJECT=lobby-ping`.
+Override either env var if the deployment target changes.
 
 ---
 
