@@ -12,3 +12,7 @@ app/.env.local
 *.log
 .DS_Store
 .vercel
+tests/e2e/.test-state.json
+playwright-report/
+test-results/
+.env.test

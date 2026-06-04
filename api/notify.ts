@@ -96,8 +96,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Anti-abuse: arrival/reminder only fire on a recent, still-pending arrival.
     // 'responded' fires after status flips to responded, so it's gated differently.
-    const createdMs = arrival.createdAt?.toMillis?.() ?? 0
-    const ageMs = Date.now() - createdMs
+    const createdMs = arrival.createdAt?.toMillis?.() ?? null
+    const ageMs = createdMs !== null ? Date.now() - createdMs : 0
     if (isResponded) {
       if (arrival.status !== 'responded') return res.status(200).json({ skipped: 'not responded' })
     } else {

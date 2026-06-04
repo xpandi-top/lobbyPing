@@ -117,7 +117,7 @@ export default function VisitorPage() {
       }
 
       const arrivalId = await createArrival(resolvedBuildingId, room.id, roomNumber, arrivalType, waitTime)
-      triggerPush(resolvedBuildingId, room.id, arrivalId, 'ring')
+      await triggerPush(resolvedBuildingId, room.id, arrivalId, 'arrival')
       navigate(`/status?b=${resolvedBuildingId}&r=${room.id}&a=${arrivalId}`)
     } catch (err) {
       console.error('[VisitorPage] onSend error:', err)
