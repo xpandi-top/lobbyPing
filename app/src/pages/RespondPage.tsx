@@ -5,6 +5,7 @@ import { CheckCircle2, ArrowDownToLine, XCircle, AlertCircle } from 'lucide-reac
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { subscribeArrival, respondToArrival } from '@/lib/firestore'
+import { triggerPush } from '@/lib/notify'
 import { getSavedRoom } from '@/lib/storage'
 import type { Arrival, ResidentResponse, ArrivalType } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -76,6 +77,7 @@ export default function RespondPage() {
     setResponding(true)
     try {
       await respondToArrival(buildingId, roomId, arrivalId, response, responderName, responderRole)
+      triggerPush(buildingId, roomId, arrivalId, 'responded', savedRoom?.deviceId)
       toast.success('Response sent')
     } catch {
       toast.error('Failed to send response')

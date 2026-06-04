@@ -44,8 +44,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' })
 
   try {
-    const { buildingId, roomId, arrivalId, kind } = (req.body ?? {}) as {
-      buildingId?: string; roomId?: string; arrivalId?: string; kind?: 'arrival' | 'reminder'
+    const { buildingId, roomId, arrivalId, kind, excludeDeviceId } = (req.body ?? {}) as {
+      buildingId?: string; roomId?: string; arrivalId?: string
+      kind?: 'arrival' | 'reminder' | 'responded'
+      excludeDeviceId?: string
     }
     if (!buildingId || !roomId || !arrivalId) {
       return res.status(400).json({ error: 'buildingId, roomId, arrivalId required' })
@@ -60,18 +62,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!arrivalSnap.exists) return res.status(404).json({ error: 'arrival not found' })
     const arrival = arrivalSnap.data()!
 
-    // Anti-abuse: only act on a recent, still-active arrival.
+    const isReminder = kind === 'reminder'
+    const isResponded = kind === 'responded'
+
+    // Anti-abuse: arrival/reminder only fire on a recent, still-pending arrival.
+    // 'responded' fires after status flips to responded, so it's gated differently.
     const createdMs = arrival.createdAt?.toMillis?.() ?? 0
     const ageMs = Date.now() - createdMs
-    if (arrival.status !== 'pending') return res.status(200).json({ skipped: 'not pending' })
-    if (kind !== 'reminder' && ageMs > 120_000) {
-      return res.status(200).json({ skipped: 'arrival too old for initial notify' })
+    if (isResponded) {
+      if (arrival.status !== 'responded') return res.status(200).json({ skipped: 'not responded' })
+    } else {
+      if (arrival.status !== 'pending') return res.status(200).json({ skipped: 'not pending' })
+      if (!isReminder && ageMs > 120_000) {
+        return res.status(200).json({ skipped: 'arrival too old for initial notify' })
+      }
     }
 
     const deviceSnap = await db.collection(`buildings/${buildingId}/rooms/${roomId}/devices`).get()
     const validDevices = deviceSnap.docs
       .map((doc) => ({ doc, token: doc.data().fcmToken as string }))
-      .filter(({ token }) => token && !token.startsWith('no-token-'))
+      // Don't notify the responder's own device about its own response.
+      .filter(({ doc, token }) =>
+        token && !token.startsWith('no-token-') && !(isResponded && doc.id === excludeDeviceId))
     if (!validDevices.length) return res.status(200).json({ sent: 0, reason: 'no device tokens' })
 
     const tokens = validDevices.map((d) => d.token)
@@ -79,26 +91,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const roomNumber = arrival.roomNumber as string
     const respondUrl = `https://apps.xpandi.top/lobbyPing/respond?b=${buildingId}&r=${roomId}&a=${arrivalId}`
 
-    const isReminder = kind === 'reminder'
-    const title = isReminder
-      ? `Reminder — ${TYPE_LABEL[type] ?? 'Visitor'} in Room ${roomNumber}`
-      : `${TYPE_LABEL[type] ?? 'Visitor'} — Room ${roomNumber}`
-    const body = isReminder
-      ? 'Still waiting downstairs. Tap to respond.'
-      : `Waiting up to ${WAIT_LABEL[arrival.waitTime as string] ?? arrival.waitTime}. Tap to respond.`
+    const RESPONSE_LABEL: Record<string, string> = {
+      coming_down: 'Coming Down', leave_in_lobby: 'Leave in Lobby', no_need_to_wait: 'No Need to Wait',
+    }
+    let title: string
+    let body: string
+    if (isResponded) {
+      const who = (arrival.respondedByName as string) || 'Someone'
+      title = `Room ${roomNumber} — handled`
+      body = `${who}: ${RESPONSE_LABEL[arrival.response as string] ?? 'Responded'}`
+    } else if (isReminder) {
+      title = `Reminder — ${TYPE_LABEL[type] ?? 'Visitor'} in Room ${roomNumber}`
+      body = 'Still waiting downstairs. Tap to respond.'
+    } else {
+      title = `${TYPE_LABEL[type] ?? 'Visitor'} — Room ${roomNumber}`
+      body = `Waiting up to ${WAIT_LABEL[arrival.waitTime as string] ?? arrival.waitTime}. Tap to respond.`
+    }
 
+    // Data-only message — prevents the duplicate banner you get when a `notification`
+    // payload auto-displays AND onBackgroundMessage also calls showNotification.
+    // The service worker builds the notification from these data fields.
+    // `tag` = arrivalId so a reminder/response replaces the prior banner instead of stacking.
     const message: admin.messaging.MulticastMessage = {
       tokens,
-      notification: { title, body },
-      webpush: {
-        notification: {
-          icon: '/lobbyPing/icon-light.png',
-          badge: '/lobbyPing/icon-light.png',
-          requireInteraction: true,
-        },
-        fcmOptions: { link: respondUrl },
+      data: {
+        buildingId, roomId, arrivalId, type, kind: kind ?? 'arrival',
+        title, body, link: respondUrl, tag: arrivalId,
       },
-      data: { buildingId, roomId, arrivalId, type },
+      webpush: { fcmOptions: { link: respondUrl } },
     }
 
     const response = await messaging.sendEachForMulticast(message)

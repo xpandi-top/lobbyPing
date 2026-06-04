@@ -6,7 +6,8 @@ export async function triggerPush(
   buildingId: string,
   roomId: string,
   arrivalId: string,
-  kind: 'arrival' | 'reminder',
+  kind: 'arrival' | 'reminder' | 'responded',
+  excludeDeviceId?: string,
 ): Promise<void> {
   if (!NOTIFY_URL) {
     console.warn('[notify] VITE_NOTIFY_URL not set — push not sent')
@@ -16,8 +17,8 @@ export async function triggerPush(
     await fetch(NOTIFY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ buildingId, roomId, arrivalId, kind }),
-      // Fire-and-forget — visitor UX must not block on push delivery.
+      body: JSON.stringify({ buildingId, roomId, arrivalId, kind, excludeDeviceId }),
+      // Fire-and-forget — UX must not block on push delivery.
       keepalive: true,
     })
   } catch (err) {

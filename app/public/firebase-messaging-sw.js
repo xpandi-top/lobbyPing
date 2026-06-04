@@ -17,18 +17,18 @@ try {
 
   const messaging = firebase.messaging()
 
+  // Data-only messages (no `notification` payload) so this is the ONLY thing that
+  // displays a banner — avoids the duplicate you get when FCM auto-shows too.
   messaging.onBackgroundMessage((payload) => {
-    const { title, body, icon } = payload.notification ?? {}
-    self.registration.showNotification(title ?? 'LobbyPing', {
-      body: body ?? '',
-      icon: icon ?? '/lobbyPing/icon-light.png',
+    const d = payload.data ?? {}
+    self.registration.showNotification(d.title || 'LobbyPing', {
+      body: d.body || '',
+      icon: '/lobbyPing/icon-light.png',
       badge: '/lobbyPing/icon-light.png',
       requireInteraction: true,
-      data: payload.data,
-      actions: [
-        { action: 'coming_down', title: 'Coming Down' },
-        { action: 'leave_in_lobby', title: 'Leave in Lobby' },
-      ],
+      tag: d.tag,        // same arrival → replaces prior banner instead of stacking
+      renotify: true,    // still alert on reminder/response updates
+      data: d,
     })
   })
 } catch (err) {

@@ -33,6 +33,7 @@ import {
   requestNotificationPermission, getFCMToken, sendTestNotification,
   setupForegroundMessaging, isIOS, isInstalledPWA,
 } from '@/lib/fcm'
+import { triggerPush } from '@/lib/notify'
 import {
   getDismissedArrivalIds,
   getLocalArrivals,
@@ -340,9 +341,10 @@ const RESPONSE_OPTIONS: { value: ResidentResponse; label: string; icon: React.FC
   { value: 'no_need_to_wait', label: 'No Need to Wait', icon: XCircle, color: 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100' },
 ]
 
-function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, responderRole, onRemove }: {
+function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, responderRole, responderDeviceId, onRemove }: {
   arrival: Arrival; buildingId: string; roomId: string
   canRespond: boolean; responderName: string; responderRole: 'owner' | 'member'
+  responderDeviceId?: string
   onRemove: (arrivalId: string) => void
 }) {
   const [responding, setResponding] = useState(false)
@@ -361,6 +363,8 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
     setResponding(true)
     try {
       await respondToArrival(buildingId, roomId, arrival.id, response, responderName, responderRole)
+      // Notify the room's OTHER devices that this arrival was handled.
+      triggerPush(buildingId, roomId, arrival.id, 'responded', responderDeviceId)
       toast.success('Response sent')
     } catch (err) {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -457,7 +461,7 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
                 <div className="space-y-1.5">
                   {RESPONSE_OPTIONS.map(({ value, label, icon: Icon, color }) => (
                     <button key={value} type="button"
-                      onClick={() => respondToArrival(buildingId, roomId, arrival.id, value, responderName, responderRole).then(() => toast.success('Response sent')).catch(err => toast.error(String(err)))}
+                      onClick={() => respondToArrival(buildingId, roomId, arrival.id, value, responderName, responderRole).then(() => { triggerPush(buildingId, roomId, arrival.id, 'responded', responderDeviceId); toast.success('Response sent') }).catch(err => toast.error(String(err)))}
                       className={cn('flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-colors text-sm', color)}>
                       <Icon className="h-3.5 w-3.5 shrink-0" />{label}
                     </button>
@@ -483,9 +487,10 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
   )
 }
 
-function ActiveArrivals({ buildingId, roomId, canRespond, responderName, responderRole }: {
+function ActiveArrivals({ buildingId, roomId, canRespond, responderName, responderRole, responderDeviceId }: {
   buildingId: string; roomId: string; canRespond: boolean
   responderName: string; responderRole: 'owner' | 'member'
+  responderDeviceId?: string
 }) {
   const [arrivals, setArrivals] = useState<Arrival[]>(() => getLocalArrivals(buildingId, roomId))
 
@@ -523,7 +528,7 @@ function ActiveArrivals({ buildingId, roomId, canRespond, responderName, respond
       {arrivals.map(a => (
         <ArrivalCard key={a.id} arrival={a} buildingId={buildingId} roomId={roomId}
           canRespond={canRespond} responderName={responderName} responderRole={responderRole}
-          onRemove={handleRemove} />
+          responderDeviceId={responderDeviceId} onRemove={handleRemove} />
       ))}
     </div>
   )
@@ -824,13 +829,16 @@ export default function ResidentPage() {
     setupForegroundMessaging(async (payload: unknown) => {
       try {
         const reg = await navigator.serviceWorker.ready
-        const p = payload as { notification?: { title?: string; body?: string; icon?: string }; data?: Record<string, string> }
-        await reg.showNotification(p.notification?.title ?? 'LobbyPing', {
-          body: p.notification?.body ?? '',
-          icon: p.notification?.icon ?? `${import.meta.env.BASE_URL}icon-light.png`,
+        // Data-only messages — read display fields from data (matches the SW handler).
+        const d = (payload as { data?: Record<string, string> }).data ?? {}
+        await reg.showNotification(d.title || 'LobbyPing', {
+          body: d.body || '',
+          icon: `${import.meta.env.BASE_URL}icon-light.png`,
           badge: `${import.meta.env.BASE_URL}icon-light.png`,
-          data: p.data,
-        })
+          tag: d.tag,
+          renotify: true,
+          data: d,
+        } as NotificationOptions & { renotify?: boolean })
       } catch (err) {
         console.error('[FCM] foreground notification failed:', err)
       }
@@ -902,7 +910,7 @@ export default function ResidentPage() {
 
           <TabsContent value="arrivals" className="mt-4">
             <ActiveArrivals key={`${buildingId}-${roomId}`} buildingId={buildingId} roomId={roomId} canRespond={canRespond}
-              responderName={responderName} responderRole={responderRole} />
+              responderName={responderName} responderRole={responderRole} responderDeviceId={savedRoom?.deviceId} />
           </TabsContent>
 
           <TabsContent value="notifications" className="mt-4">
