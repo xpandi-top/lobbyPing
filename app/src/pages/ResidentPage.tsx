@@ -31,7 +31,7 @@ import {
 } from '@/lib/firestore'
 import {
   requestNotificationPermission, getFCMToken, sendTestNotification,
-  isIOS, isInstalledPWA,
+  setupForegroundMessaging, isIOS, isInstalledPWA,
 } from '@/lib/fcm'
 import {
   getDismissedArrivalIds,
@@ -811,6 +811,26 @@ export default function ResidentPage() {
       setRoom(r); if (b) setBuildingName(b.name); setLoading(false)
     })
   }, [buildingId, roomId])
+
+  // Show system notification popup when FCM message arrives while app is foregrounded.
+  // Without this, FCM bypasses the SW on foreground and nothing shows.
+  useEffect(() => {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return
+    setupForegroundMessaging(async (payload: unknown) => {
+      try {
+        const reg = await navigator.serviceWorker.ready
+        const p = payload as { notification?: { title?: string; body?: string; icon?: string }; data?: Record<string, string> }
+        await reg.showNotification(p.notification?.title ?? 'LobbyPing', {
+          body: p.notification?.body ?? '',
+          icon: p.notification?.icon ?? `${import.meta.env.BASE_URL}icon-light.png`,
+          badge: `${import.meta.env.BASE_URL}icon-light.png`,
+          data: p.data,
+        })
+      } catch (err) {
+        console.error('[FCM] foreground notification failed:', err)
+      }
+    })
+  }, [])
 
   function handleLeave() {
     if (!confirm('Leave this room? You will need a new invite code to rejoin.')) return
