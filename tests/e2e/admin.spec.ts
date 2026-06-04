@@ -92,14 +92,16 @@ test.describe('admin — building and room management', () => {
     await page.goto(`${PATH}/admin?key=${ADMIN_KEY}`)
     await waitForAuth(page)
     await page.locator('text=Signing in…').waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => undefined)
-    await expect(page.getByText('E2E Delete Me')).toBeVisible({ timeout: 10_000 })
+    // Use the unique slug (mono text) to scope to the exact building row
+    await expect(page.locator(`text=${slug}`)).toBeVisible({ timeout: 10_000 })
 
-    // Scope trash button to the row containing this building's name
+    // Scope trash button to the row containing this specific slug
     page.on('dialog', (dialog) => dialog.accept())
     const buildingRow = page.locator('.flex.items-center.justify-between').filter({
-      has: page.getByText('E2E Delete Me'),
+      has: page.locator(`text=${slug}`),
     })
     await buildingRow.getByRole('button').last().click()
-    await expect(page.getByText('E2E Delete Me')).not.toBeVisible({ timeout: 8_000 })
+    // Verify this specific slug is gone
+    await expect(page.locator(`text=${slug}`)).not.toBeVisible({ timeout: 8_000 })
   })
 })
