@@ -829,15 +829,15 @@ export default function ResidentPage() {
     setupForegroundMessaging(async (payload: unknown) => {
       try {
         const reg = await navigator.serviceWorker.ready
-        // Data-only messages — read display fields from data (matches the SW handler).
-        const d = (payload as { data?: Record<string, string> }).data ?? {}
-        await reg.showNotification(d.title || 'LobbyPing', {
-          body: d.body || '',
+        // Foreground onMessage carries the notification payload; data holds the tag.
+        const p = payload as { notification?: { title?: string; body?: string }; data?: Record<string, string> }
+        await reg.showNotification(p.notification?.title ?? 'LobbyPing', {
+          body: p.notification?.body ?? '',
           icon: `${import.meta.env.BASE_URL}icon-light.png`,
           badge: `${import.meta.env.BASE_URL}icon-light.png`,
-          tag: d.tag,
+          tag: p.data?.tag,
           renotify: true,
-          data: d,
+          data: p.data,
         } as NotificationOptions & { renotify?: boolean })
       } catch (err) {
         console.error('[FCM] foreground notification failed:', err)

@@ -108,17 +108,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body = `Waiting up to ${WAIT_LABEL[arrival.waitTime as string] ?? arrival.waitTime}. Tap to respond.`
     }
 
-    // Data-only message — prevents the duplicate banner you get when a `notification`
-    // payload auto-displays AND onBackgroundMessage also calls showNotification.
-    // The service worker builds the notification from these data fields.
+    // iOS Safari Web Push REQUIRES a notification payload — data-only messages are
+    // dropped on iPhone. FCM auto-displays this in the background; we removed the SW's
+    // onBackgroundMessage so it does NOT double-display (that was the duplicate bug).
     // `tag` = arrivalId so a reminder/response replaces the prior banner instead of stacking.
     const message: admin.messaging.MulticastMessage = {
       tokens,
-      data: {
-        buildingId, roomId, arrivalId, type, kind: kind ?? 'arrival',
-        title, body, link: respondUrl, tag: arrivalId,
+      notification: { title, body },
+      webpush: {
+        notification: {
+          icon: '/lobbyPing/icon-light.png',
+          badge: '/lobbyPing/icon-light.png',
+          requireInteraction: true,
+          tag: arrivalId,
+          renotify: true,
+        },
+        fcmOptions: { link: respondUrl },
       },
-      webpush: { fcmOptions: { link: respondUrl } },
+      data: { buildingId, roomId, arrivalId, type, kind: kind ?? 'arrival', tag: arrivalId },
     }
 
     const response = await messaging.sendEachForMulticast(message)
