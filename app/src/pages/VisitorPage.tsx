@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { getBuildingBySlug, getBuilding, getRoomByNumber, createArrival, listRooms } from '@/lib/firestore'
+import { triggerPush } from '@/lib/notify'
 import type { ArrivalType, Room, WaitTime } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -116,6 +117,7 @@ export default function VisitorPage() {
       }
 
       const arrivalId = await createArrival(resolvedBuildingId, room.id, roomNumber, arrivalType, waitTime)
+      triggerPush(resolvedBuildingId, room.id, arrivalId, 'arrival')
       navigate(`/status?b=${resolvedBuildingId}&r=${room.id}&a=${arrivalId}`)
     } catch (err) {
       console.error('[VisitorPage] onSend error:', err)

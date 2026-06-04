@@ -12,6 +12,7 @@ import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { subscribeArrival, sendReminder, getRoom, sendVisitorAck } from '@/lib/firestore'
+import { triggerPush } from '@/lib/notify'
 import type { Arrival, ResidentResponse, ArrivalType } from '@/lib/types'
 
 const MAX_REMINDERS = 3
@@ -215,6 +216,7 @@ export default function StatusPage() {
   async function handleReminder() {
     if (!arrival || arrival.reminderCount >= MAX_REMINDERS || reminderCooldown > 0) return
     await sendReminder(buildingId, roomId, arrivalId, arrival.reminderCount)
+    triggerPush(buildingId, roomId, arrivalId, 'reminder')
     toast.success('Reminder sent')
     startCooldown()
   }

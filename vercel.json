@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "echo 'no frontend build — API only'",
+  "outputDirectory": "api-public",
+  "framework": null,
+  "functions": {
+    "api/notify.ts": { "maxDuration": 10 }
+  }
+}
