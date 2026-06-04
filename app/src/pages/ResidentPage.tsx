@@ -491,10 +491,59 @@ function ActiveArrivals({ buildingId, roomId, canRespond, responderName, respond
 
   useEffect(() => {
     if (!buildingId || !roomId) return
+
+    async function showArrivalNotification(arrival: Arrival, isReminder = false) {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return
+      try {
+        const reg = await navigator.serviceWorker.ready
+        const typeLabel: Record<string, string> = { package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Visitor' }
+        const waitLabel: Record<string, string> = { '1min': '1 min', '2min': '2 min', '5min': '5 min' }
+        const title = isReminder
+          ? `Reminder — ${typeLabel[arrival.type] ?? 'Visitor'} waiting`
+          : `${typeLabel[arrival.type] ?? 'Visitor'} — Room ${arrival.roomNumber}`
+        await reg.showNotification(title, {
+          body: isReminder
+            ? 'Still waiting downstairs. Tap to respond.'
+            : `Waiting up to ${waitLabel[arrival.waitTime] ?? arrival.waitTime}. Tap to respond.`,
+          icon: `${import.meta.env.BASE_URL}icon-light.png`,
+          badge: `${import.meta.env.BASE_URL}icon-light.png`,
+          data: { buildingId, roomId, arrivalId: arrival.id },
+        })
+      } catch (err) {
+        console.error('[Notify] showArrivalNotification failed:', err)
+      }
+    }
+
     // Include 'expired' so arrivals with visitor notes stay visible until Cloud Function cleans them up (30min)
     const q = query(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'), where('status', 'in', ['pending', 'responded', 'expired']))
+    let initialLoadDone = false
+    const prevReminderCount = new Map<string, number>()
+
     return onSnapshot(q, (snap) => {
       const dismissed = getDismissedArrivalIds(buildingId, roomId)
+
+      if (initialLoadDone) {
+        snap.docChanges().forEach((change) => {
+          const arrival = { id: change.doc.id, ...change.doc.data() } as Arrival
+          if (dismissed.has(arrival.id)) return
+          if (change.type === 'added' && arrival.status === 'pending') {
+            showArrivalNotification(arrival)
+          } else if (change.type === 'modified') {
+            const prev = prevReminderCount.get(arrival.id) ?? 0
+            if (arrival.reminderCount > prev && arrival.status === 'pending') {
+              showArrivalNotification(arrival, true)
+            }
+          }
+        })
+      }
+      initialLoadDone = true
+
+      // Update reminder count tracking
+      snap.docs.forEach((d) => {
+        const data = d.data()
+        prevReminderCount.set(d.id, data.reminderCount ?? 0)
+      })
+
       const liveArrivals = snap.docs
         .map(d => ({ id: d.id, ...d.data() }) as Arrival)
         .filter((arrival) => !dismissed.has(arrival.id))
