@@ -20,8 +20,8 @@ test.describe('admin — building and room management', () => {
 
     const slug = `e2e-admin-${Date.now()}`
     await page.getByRole('button', { name: 'New Building' }).click()
-    await page.getByLabel('Building name').fill('E2E Admin Building')
-    await page.getByLabel('URL slug').fill(slug)
+    await page.getByPlaceholder('Maple Heights').fill('E2E Admin Building')
+    await page.getByPlaceholder('maple-heights').fill(slug)
     await page.getByRole('button', { name: 'Create' }).click()
 
     await expect(page.getByText('E2E Admin Building')).toBeVisible()
@@ -31,7 +31,7 @@ test.describe('admin — building and room management', () => {
 
     // Add a room
     await page.getByRole('button', { name: 'Add Room' }).click()
-    await page.getByLabel('Room number').fill('E2E-1')
+    await page.getByPlaceholder(/Room number/).fill('E2E-1')
     await page.getByRole('button', { name: 'Add' }).click()
     await expect(page.getByText('E2E-1')).toBeVisible()
 
@@ -62,8 +62,8 @@ test.describe('admin — building and room management', () => {
     const slug = `e2e-room-del-${Date.now()}`
     // Create building first
     await page.getByRole('button', { name: 'New Building' }).click()
-    await page.getByLabel('Building name').fill('E2E Room Delete Test')
-    await page.getByLabel('URL slug').fill(slug)
+    await page.getByPlaceholder('Maple Heights').fill('E2E Room Delete Test')
+    await page.getByPlaceholder('maple-heights').fill(slug)
     await page.getByRole('button', { name: 'Create' }).click()
     await expect(page.getByText('E2E Room Delete Test')).toBeVisible()
 
@@ -71,7 +71,7 @@ test.describe('admin — building and room management', () => {
     await expect(page.getByText('Add Room')).toBeVisible()
 
     await page.getByRole('button', { name: 'Add Room' }).click()
-    await page.getByLabel('Room number').fill('DEL-1')
+    await page.getByPlaceholder(/Room number/).fill('DEL-1')
     await page.getByRole('button', { name: 'Add' }).click()
     await expect(page.getByText('DEL-1')).toBeVisible()
 
@@ -88,8 +88,8 @@ test.describe('admin — building and room management', () => {
 
     const slug = `e2e-qr-${Date.now()}`
     await page.getByRole('button', { name: 'New Building' }).click()
-    await page.getByLabel('Building name').fill('E2E QR Test')
-    await page.getByLabel('URL slug').fill(slug)
+    await page.getByPlaceholder('Maple Heights').fill('E2E QR Test')
+    await page.getByPlaceholder('maple-heights').fill(slug)
     await page.getByRole('button', { name: 'Create' }).click()
     await page.getByText('E2E QR Test').click()
 
