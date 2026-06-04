@@ -4,6 +4,8 @@
   "private": true,
   "description": "Vercel serverless push-send endpoint for LobbyPing (FCM)",
   "scripts": {
+    "test": "node -e \"console.log('Root tests are split by target. Run npm run test:rules for Firestore rules.')\"",
+    "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/firestore.rules.test.ts\"",
     "deploy": "node scripts/deploy.mjs all",
     "deploy:rules": "node scripts/deploy.mjs rules",
     "deploy:api": "node scripts/deploy.mjs api",
@@ -13,6 +15,10 @@
     "firebase-admin": "^13.10.0"
   },
   "devDependencies": {
-    "@vercel/node": "^5.1.0"
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "@vercel/node": "^5.1.0",
+    "firebase": "^12.14.0",
+    "firebase-tools": "^15.19.1",
+    "vitest": "^4.1.8"
   }
 }

@@ -1,0 +1,61 @@
+name: Deploy Firebase Rules and Vercel API
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - rules
+          - api
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-services:
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_PROJECT: ${{ vars.FIREBASE_PROJECT || 'lobbyping-5ae0f' }}
+      VERCEL_PROJECT: ${{ vars.VERCEL_PROJECT || 'lobby-ping' }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Write Firebase credentials
+        if: ${{ inputs.target == 'all' || inputs.target == 'rules' }}
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Deploy Firestore rules
+        if: ${{ inputs.target == 'all' || inputs.target == 'rules' }}
+        run: npx firebase deploy --only firestore:rules --project "$FIREBASE_PROJECT"
+
+      - name: Pull Vercel project
+        if: ${{ inputs.target == 'all' || inputs.target == 'api' }}
+        run: npx vercel pull --yes --environment=production --token "${{ secrets.VERCEL_TOKEN }}"
+
+      - name: Deploy Vercel API
+        if: ${{ inputs.target == 'all' || inputs.target == 'api' }}
+        run: npx vercel deploy --prod --yes --token "${{ secrets.VERCEL_TOKEN }}"

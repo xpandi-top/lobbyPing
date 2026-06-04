@@ -14,22 +14,21 @@ import { Textarea } from '@/components/ui/textarea'
 import { subscribeArrival, sendReminder, getRoom, sendVisitorAck, ringResident } from '@/lib/firestore'
 import { triggerPush } from '@/lib/notify'
 import { playRingAlarm } from '@/lib/ring'
+import {
+  MAX_REMINDERS,
+  REMINDER_COOLDOWN_MS,
+  MAX_RINGS,
+  RING_COOLDOWN_MS,
+  VISITOR_REPLY_TIMEOUT_SECONDS,
+  WAIT_MS,
+} from '@/lib/arrivalPolicy'
 import type { Arrival, ResidentResponse, ArrivalType } from '@/lib/types'
-
-const MAX_REMINDERS = 3
-const REMINDER_COOLDOWN_MS = 30_000
-const MAX_RINGS = 3
-const RING_COOLDOWN_MS = 20_000
-const VISITOR_REPLY_TIMEOUT_SECONDS = 60
 
 const TYPE_LABELS: Record<ArrivalType, string> = {
   package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Other',
 }
 const TYPE_ICONS: Record<ArrivalType, React.FC<{ className?: string }>> = {
   package: Package, food: Utensils, guest: Users, other: HelpCircle,
-}
-const WAIT_MS: Record<string, number> = {
-  '1min': 60_000, '2min': 120_000, '5min': 300_000,
 }
 
 // Predefined ack options based on resident response

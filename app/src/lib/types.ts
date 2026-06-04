@@ -69,6 +69,7 @@ export interface Arrival {
   id: string
   buildingId: string
   roomId: string
+  visitorUid: string
   roomNumber: string
   type: ArrivalType
   waitTime: WaitTime
@@ -77,6 +78,7 @@ export interface Arrival {
   responseMessage: string | null
   respondedByName: string | null
   respondedByRole: UserRole | null
+  respondedByDeviceId: string | null
   visitorAck: string | null        // visitor's acknowledgment after resident responds (or final msg)
   visitorAckTime: Timestamp | null
   reminderCount: number
@@ -85,6 +87,7 @@ export interface Arrival {
   lastRingBy: RingBy | null
   residentRingCount: number
   lastResidentRingAt: Timestamp | null
+  lastResidentRingByDeviceId: string | null
   createdAt: Timestamp
   expiresAt: Timestamp
 }
@@ -97,6 +100,7 @@ export interface SavedRoom {
   deviceId: string
   userId: string
   role: UserRole
+  permissions?: InviteCodePermissions
   name: string          // display name
   buildingName: string
   roomNumber: string

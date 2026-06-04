@@ -23,7 +23,7 @@ const ALLOWED_ORIGINS = new Set([
   'http://localhost:5174',
 ])
 
-function setCors(req: VercelRequest, res: VercelResponse) {
+function setCors(req: VercelRequest, res: VercelResponse): boolean {
   const origin = req.headers.origin
   if (origin && ALLOWED_ORIGINS.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin)
@@ -31,17 +31,39 @@ function setCors(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Vary', 'Origin')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  return !origin || ALLOWED_ORIGINS.has(origin)
 }
 
 const TYPE_LABEL: Record<string, string> = {
   package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Visitor',
 }
 const WAIT_LABEL: Record<string, string> = { '1min': '1 min', '2min': '2 min', '5min': '5 min' }
+const RATE_LIMIT_WINDOW_MS = 60_000
+const RATE_LIMIT_MAX = 8
+const rateBuckets = new Map<string, { count: number; resetAt: number }>()
+
+function rateLimitKey(req: VercelRequest, buildingId: string, roomId: string, arrivalId: string): string {
+  const forwarded = req.headers['x-forwarded-for']
+  const ip = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0]
+  return `${ip ?? req.socket.remoteAddress ?? 'unknown'}:${buildingId}:${roomId}:${arrivalId}`
+}
+
+function isRateLimited(key: string): boolean {
+  const now = Date.now()
+  const current = rateBuckets.get(key)
+  if (!current || current.resetAt <= now) {
+    rateBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+    return false
+  }
+  current.count += 1
+  return current.count > RATE_LIMIT_MAX
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  setCors(req, res)
+  const originAllowed = setCors(req, res)
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' })
+  if (!originAllowed) return res.status(403).json({ error: 'origin not allowed' })
 
   try {
     const { buildingId, roomId, arrivalId, kind, excludeDeviceId } = (req.body ?? {}) as {
@@ -51,6 +73,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (!buildingId || !roomId || !arrivalId) {
       return res.status(400).json({ error: 'buildingId, roomId, arrivalId required' })
+    }
+    if (kind && !['arrival', 'reminder', 'responded', 'ring'].includes(kind)) {
+      return res.status(400).json({ error: 'invalid notification kind' })
+    }
+    if (isRateLimited(rateLimitKey(req, buildingId, roomId, arrivalId))) {
+      return res.status(429).json({ error: 'rate limited' })
     }
 
     const db = getApp().firestore()
@@ -79,6 +107,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (isRing && ageMs > 30 * 60_000) {
         return res.status(200).json({ skipped: 'arrival too old for ring' })
+      }
+      if (isRing && (arrival.ringCount ?? 0) > 0 && arrival.lastRingBy !== 'visitor') {
+        return res.status(200).json({ skipped: 'ring state not confirmed' })
       }
     }
 

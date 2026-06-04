@@ -107,6 +107,7 @@ export default function JoinPage() {
         deviceId,
         userId,
         role: inviteCode.role,
+        permissions: inviteCode.permissions,
         name: data.name,
         buildingName: building?.name ?? 'Unknown Building',
         roomNumber: room?.number ?? '?',

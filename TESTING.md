@@ -5,6 +5,7 @@
 1. Firebase Console — enable these (one-time):
    - **Firestore Database** → Create database → Production mode → choose region
    - **Authentication** → Sign-in method → Anonymous → Enable
+   - For admin writes with hardened rules, grant the admin Firebase Auth user the custom claim `{ admin: true }`
 
 2. Dev server running:
    ```
@@ -18,7 +19,7 @@
 
 Open in browser (Tab A):
 ```
-http://localhost:5173/lobbyPing/#/admin?key=6oQLVcqa
+http://localhost:5173/lobbyPing/admin?key=YOUR_KEY
 ```
 
 1. Fill in building name (e.g. `Test Building`) and slug (e.g. `test-building`)
@@ -33,7 +34,7 @@ http://localhost:5173/lobbyPing/#/admin?key=6oQLVcqa
 
 Open in browser (Tab B — can be same browser or different device):
 ```
-http://localhost:5173/lobbyPing/#/join?b=BUILDING_ID&code=INVITE_CODE
+http://localhost:5173/lobbyPing/join?b=BUILDING_ID&code=INVITE_CODE
 ```
 
 Or paste the copied invite link directly.
@@ -51,7 +52,7 @@ Or paste the copied invite link directly.
 
 Open in browser (Tab C — incognito recommended to simulate different user):
 ```
-http://localhost:5173/lobbyPing/#/visit?b=BUILDING_ID
+http://localhost:5173/lobbyPing/visit?b=BUILDING_ID
 ```
 
 Or use the QR code from the Admin panel (print it, or just use the URL).
@@ -62,9 +63,8 @@ Or use the QR code from the Admin panel (print it, or just use the URL).
 4. Click **Notify Resident**
 5. Lands on Status page — shows "Notification sent, waiting…"
 
-> **Note:** Push notification only fires if Cloud Functions are deployed.
-> Locally, the arrival doc is created in Firestore but no FCM push is sent.
-> Test the response flow manually (Step 4) by opening the respond URL directly.
+> **Note:** Push notification fires through `VITE_NOTIFY_URL`.
+> For local end-to-end push tests, set `VITE_NOTIFY_URL` to the deployed Vercel endpoint or a local compatible API.
 
 ---
 
@@ -72,7 +72,7 @@ Or use the QR code from the Admin panel (print it, or just use the URL).
 
 After visitor sends, open respond URL in resident's browser:
 ```
-http://localhost:5173/lobbyPing/#/respond?b=BUILDING_ID&r=ROOM_ID&a=ARRIVAL_ID
+http://localhost:5173/lobbyPing/respond?b=BUILDING_ID&r=ROOM_ID&a=ARRIVAL_ID
 ```
 
 Get ROOM_ID and ARRIVAL_ID from the Status page URL (Tab C).
@@ -85,6 +85,28 @@ Get ROOM_ID and ARRIVAL_ID from the Status page URL (Tab C).
 ## Step 5 — Visitor: Sees Response
 
 Back in Tab C (Status page) — response appears automatically via Firestore real-time listener.
+
+The visitor may reply to the resident. If the visitor does nothing after a resident response, the page returns to room selection after 60 seconds.
+
+---
+
+## Automated Checks
+
+From the repo root:
+
+```bash
+npm test
+npm run test:rules
+```
+
+From the frontend app:
+
+```bash
+cd app
+npm run lint
+npm test
+npm run build
+```
 
 ---
 
@@ -112,11 +134,11 @@ Override either env var if the deployment target changes.
 
 | Role     | URL |
 |----------|-----|
-| Admin    | `/#/admin?key=6oQLVcqa` |
-| Resident join | `/#/join?b=BUILDING_ID&code=INVITE_CODE` |
+| Admin    | `/admin?key=YOUR_KEY` |
+| Resident join | `/join?b=BUILDING_ID&code=INVITE_CODE` |
 | Resident dashboard | `/home?b=BUILDING_ID&r=ROOM_ID` |
-| Visitor  | `/#/visit?b=BUILDING_ID` |
-| Visitor status | `/#/status?b=B&r=R&a=ARRIVAL_ID` |
-| Resident respond | `/#/respond?b=B&r=R&a=ARRIVAL_ID` |
+| Visitor  | `/visit?b=BUILDING_ID` |
+| Visitor status | `/status?b=B&r=R&a=ARRIVAL_ID` |
+| Resident respond | `/respond?b=B&r=R&a=ARRIVAL_ID` |
 
-Replace base `http://localhost:5173/lobbyPing/` with `https://xpandi-top.github.io/lobbyPing/` for production.
+Replace base `http://localhost:5173/lobbyPing/` with `https://apps.xpandi.top/lobbyPing/` for production.

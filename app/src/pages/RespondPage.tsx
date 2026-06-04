@@ -78,9 +78,13 @@ export default function RespondPage() {
 
   async function handleResponse(response: ResidentResponse, message?: string) {
     if (!arrival || responding) return
+    if (!savedRoom?.deviceId) {
+      toast.error('Open this link from a registered resident device.')
+      return
+    }
     setResponding(true)
     try {
-      await respondToArrival(buildingId, roomId, arrivalId, response, responderName, responderRole, message)
+      await respondToArrival(buildingId, roomId, arrivalId, response, responderName, responderRole, savedRoom.deviceId, message)
       triggerPush(buildingId, roomId, arrivalId, 'responded', savedRoom?.deviceId)
       toast.success('Response sent')
     } catch {

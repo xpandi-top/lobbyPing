@@ -411,6 +411,15 @@ export default function AdminPage() {
   const [view, setView] = useState<AdminView>(() => searchParams.get('b') ? 'detail' : 'list')
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null)
 
+  useEffect(() => {
+    const bId = searchParams.get('b')
+    if (bId && !selectedBuilding) {
+      getBuilding(bId).then((b) => {
+        if (b) { setSelectedBuilding(b); setView('detail') }
+      })
+    }
+  }, [])
+
   if (key !== ADMIN_KEY) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center p-4">
@@ -422,15 +431,6 @@ export default function AdminPage() {
       </div>
     )
   }
-
-  useEffect(() => {
-    const bId = searchParams.get('b')
-    if (bId && !selectedBuilding) {
-      getBuilding(bId).then((b) => {
-        if (b) { setSelectedBuilding(b); setView('detail') }
-      })
-    }
-  }, [])
 
   function selectBuilding(b: Building) {
     setSelectedBuilding(b)

@@ -27,13 +27,18 @@ import {
   getRoom, getBuilding,
   updateDeviceFCMToken, updateInstructions, respondToArrival,
   createInviteCode, listInviteCodes, deleteInviteCode,
-  listDevices, removeDevice, ringVisitor,
+  listDevices, removeDevice, ringVisitor, ensureResidentProfile,
 } from '@/lib/firestore'
 import {
   requestNotificationPermission, getFCMToken, sendTestNotification,
   setupForegroundMessaging, isIOS, isInstalledPWA,
 } from '@/lib/fcm'
 import { triggerPush } from '@/lib/notify'
+import {
+  MAX_RINGS,
+  RING_COOLDOWN_MS,
+  WAIT_MS,
+} from '@/lib/arrivalPolicy'
 import { playRingAlarm, primeRingAudio } from '@/lib/ring'
 import {
   getDismissedArrivalIds,
@@ -319,9 +324,6 @@ function NotificationGuide() {
 
 const TYPE_LABELS: Record<ArrivalType, string> = { package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Other' }
 const WAIT_LABELS: Record<string, string> = { '1min': '1 min', '2min': '2 min', '5min': '5 min' }
-const WAIT_MS: Record<string, number> = { '1min': 60_000, '2min': 120_000, '5min': 300_000 }
-const MAX_RINGS = 3
-const RING_COOLDOWN_MS = 20_000
 
 function useElapsed(createdAtMs: number, active: boolean) {
   const [elapsed, setElapsed] = useState(Date.now() - createdAtMs)
@@ -408,9 +410,13 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
 
   async function handleResponse(response: ResidentResponse, message?: string) {
     if (responding || !canRespond) return
+    if (!responderDeviceId) {
+      toast.error('Registered resident device required.')
+      return
+    }
     setResponding(true)
     try {
-      await respondToArrival(buildingId, roomId, arrival.id, response, responderName, responderRole, message)
+      await respondToArrival(buildingId, roomId, arrival.id, response, responderName, responderRole, responderDeviceId, message)
       // Notify the room's OTHER devices that this arrival was handled.
       triggerPush(buildingId, roomId, arrival.id, 'responded', responderDeviceId)
       toast.success('Response sent')
@@ -422,9 +428,13 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
 
   async function handleRingVisitor() {
     if (!canRingVisitor || ringingVisitor || residentRingCount >= MAX_RINGS || ringCooldown > 0) return
+    if (!responderDeviceId) {
+      toast.error('Registered resident device required.')
+      return
+    }
     setRingingVisitor(true)
     try {
-      await ringVisitor(buildingId, roomId, arrival.id, residentRingCount)
+      await ringVisitor(buildingId, roomId, arrival.id, residentRingCount, responderDeviceId)
       toast.success('Visitor ring sent')
       startRingCooldown()
     } catch (err) {
@@ -600,7 +610,15 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
                 <div className="space-y-1.5">
                   {RESPONSE_OPTIONS.map(({ value, label, icon: Icon, color }) => (
                     <button key={value} type="button"
-                      onClick={() => respondToArrival(buildingId, roomId, arrival.id, value, responderName, responderRole).then(() => { triggerPush(buildingId, roomId, arrival.id, 'responded', responderDeviceId); toast.success('Response sent') }).catch(err => toast.error(String(err)))}
+                      onClick={() => {
+                        if (!responderDeviceId) {
+                          toast.error('Registered resident device required.')
+                          return
+                        }
+                        respondToArrival(buildingId, roomId, arrival.id, value, responderName, responderRole, responderDeviceId)
+                          .then(() => { triggerPush(buildingId, roomId, arrival.id, 'responded', responderDeviceId); toast.success('Response sent') })
+                          .catch(err => toast.error(String(err)))
+                      }}
                       className={cn('flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-colors text-sm', color)}>
                       <Icon className="h-3.5 w-3.5 shrink-0" />{label}
                     </button>
@@ -725,11 +743,13 @@ function DeliveryInstructionsForm({ buildingId, roomId, initial }: { buildingId:
 
 // ── Owner: Manage Members ──────────────────────────────────────────────────
 
-const memberCodeSchema = z.object({
-  expiryDays: z.string().optional(),
-  canRespond: z.boolean().default(false),
-})
-type MemberCodeForm = z.infer<typeof memberCodeSchema>
+type MemberCodeForm = {
+  expiryDays?: string
+  canRespond: boolean
+}
+const memberCodeDefaults: MemberCodeForm = {
+  canRespond: false,
+}
 
 function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: string; roomId: string; ownerDeviceId: string }) {
   const [codes, setCodes] = useState<InviteCode[]>([])
@@ -737,7 +757,7 @@ function MembersPanel({ buildingId, roomId, ownerDeviceId }: { buildingId: strin
   const [creatingCode, setCreatingCode] = useState(false)
   const [transferCode, setTransferCode] = useState<string | null>(null)
   const [showMemberForm, setShowMemberForm] = useState(false)
-  const { register, handleSubmit, watch, setValue, reset } = useForm<MemberCodeForm>({ defaultValues: { canRespond: false } })
+  const { register, handleSubmit, watch, setValue, reset } = useForm<MemberCodeForm>({ defaultValues: memberCodeDefaults })
   const canRespond = watch('canRespond')
 
   useEffect(() => {
@@ -961,7 +981,7 @@ export default function ResidentPage() {
 
   const savedRoom = getSavedRoom(buildingId, roomId)
   const isOwner = savedRoom?.role === 'owner'
-  const canRespond = savedRoom != null // both owner and member can respond (owner always, member if permissions.respond)
+  const canRespond = savedRoom?.role === 'owner' || savedRoom?.permissions?.respond === true
   const responderName = savedRoom?.name ?? 'Resident'
   const responderRole = savedRoom?.role ?? 'member'
 
@@ -972,6 +992,23 @@ export default function ResidentPage() {
       setRoom(r); if (b) setBuildingName(b.name); setLoading(false)
     })
   }, [buildingId, roomId])
+
+  useEffect(() => {
+    if (!savedRoom?.deviceId || !savedRoom.userId) return
+    const permissions = savedRoom.permissions ?? {
+      notify: true,
+      respond: savedRoom.role === 'owner',
+    }
+    ensureResidentProfile(
+      buildingId,
+      roomId,
+      savedRoom.deviceId,
+      savedRoom.role,
+      savedRoom.userId,
+      permissions,
+      savedRoom.name,
+    ).catch((err) => console.warn('[ResidentPage] resident profile sync failed:', err))
+  }, [buildingId, roomId, savedRoom?.deviceId, savedRoom?.userId, savedRoom?.role, savedRoom?.permissions, savedRoom?.name])
 
   useEffect(() => {
     const unlock = () => { void primeRingAudio() }

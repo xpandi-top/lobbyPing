@@ -1,78 +1,223 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
 
-    // Buildings: read by all, write by authenticated users
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    function roomPath(buildingId, roomId) {
+      return /databases/$(database)/documents/buildings/$(buildingId)/rooms/$(roomId);
+    }
+
+    function devicePath(buildingId, roomId, deviceId) {
+      return /databases/$(database)/documents/buildings/$(buildingId)/rooms/$(roomId)/devices/$(deviceId);
+    }
+
+    function residentPath(buildingId, roomId, uid) {
+      return /databases/$(database)/documents/buildings/$(buildingId)/rooms/$(roomId)/residents/$(uid);
+    }
+
+    function isRoomResident(buildingId, roomId) {
+      return signedIn() && exists(residentPath(buildingId, roomId, request.auth.uid));
+    }
+
+    function residentProfile(buildingId, roomId) {
+      return get(residentPath(buildingId, roomId, request.auth.uid)).data;
+    }
+
+    function isRoomOwner(buildingId, roomId) {
+      return isRoomResident(buildingId, roomId) &&
+        residentProfile(buildingId, roomId).role == 'owner';
+    }
+
+    function isDeviceUser(buildingId, roomId, deviceId) {
+      return signedIn() &&
+        exists(devicePath(buildingId, roomId, deviceId)) &&
+        get(devicePath(buildingId, roomId, deviceId)).data.userId == request.auth.uid;
+    }
+
+    function deviceCanRespond(buildingId, roomId, deviceId) {
+      return isDeviceUser(buildingId, roomId, deviceId) &&
+        get(devicePath(buildingId, roomId, deviceId)).data.permissions.respond == true;
+    }
+
+    function inviteCodeShape() {
+      return request.resource.data.keys().hasAll([
+        'code','buildingId','roomId','role','redeemed','redeemedAt',
+        'redeemedByDeviceId','createdBy','expiresAt','permissions','createdAt'
+      ]) &&
+      request.resource.data.role in ['owner','member'] &&
+      request.resource.data.redeemed == false &&
+      request.resource.data.permissions.keys().hasOnly(['notify', 'respond']) &&
+      request.resource.data.permissions.notify is bool &&
+      request.resource.data.permissions.respond is bool;
+    }
+
+    function arrivalCreateShape(buildingId, roomId) {
+      return request.resource.data.keys().hasAll([
+        'buildingId','roomId','visitorUid','roomNumber','type','waitTime',
+        'status','response','responseMessage','respondedByName','respondedByRole',
+        'respondedByDeviceId','visitorAck','visitorAckTime','reminderCount',
+        'ringCount','lastRingAt','lastRingBy','residentRingCount',
+        'lastResidentRingAt','lastResidentRingByDeviceId','createdAt','expiresAt'
+      ]) &&
+      request.resource.data.buildingId == buildingId &&
+      request.resource.data.roomId == roomId &&
+      request.resource.data.visitorUid == request.auth.uid &&
+      request.resource.data.status == 'pending' &&
+      request.resource.data.response == null &&
+      request.resource.data.responseMessage == null &&
+      request.resource.data.respondedByName == null &&
+      request.resource.data.respondedByRole == null &&
+      request.resource.data.respondedByDeviceId == null &&
+      request.resource.data.visitorAck == null &&
+      request.resource.data.visitorAckTime == null &&
+      request.resource.data.reminderCount == 0 &&
+      request.resource.data.ringCount == 0 &&
+      request.resource.data.lastRingAt == null &&
+      request.resource.data.lastRingBy == null &&
+      request.resource.data.residentRingCount == 0 &&
+      request.resource.data.lastResidentRingAt == null &&
+      request.resource.data.lastResidentRingByDeviceId == null &&
+      request.resource.data.type in ['package','food','guest','other'] &&
+      request.resource.data.waitTime in ['1min','2min','5min'] &&
+      request.resource.data.createdAt == request.time;
+    }
+
+    function visitorOwnsArrival() {
+      return signedIn() && resource.data.visitorUid == request.auth.uid;
+    }
+
+    function unchangedArrivalIdentity() {
+      return request.resource.data.buildingId == resource.data.buildingId &&
+        request.resource.data.roomId == resource.data.roomId &&
+        request.resource.data.visitorUid == resource.data.visitorUid &&
+        request.resource.data.roomNumber == resource.data.roomNumber &&
+        request.resource.data.type == resource.data.type &&
+        request.resource.data.waitTime == resource.data.waitTime &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.expiresAt == resource.data.expiresAt;
+    }
+
     match /buildings/{buildingId} {
       allow read: if true;
-      allow create, update, delete: if request.auth != null;
+      allow create, update, delete: if isAdmin();
 
-      // Rooms
       match /rooms/{roomId} {
         allow read: if true;
-        allow create, update, delete: if request.auth != null;
+        allow create, delete: if isAdmin();
+        allow update: if isAdmin() || (
+          isRoomOwner(buildingId, roomId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['instructions']) &&
+          request.resource.data.instructions.keys().hasOnly(['package', 'food', 'guest']) &&
+          request.resource.data.instructions.package is string &&
+          request.resource.data.instructions.food is string &&
+          request.resource.data.instructions.guest is string
+        );
 
-        // Invite Codes
         match /inviteCodes/{codeId} {
-          // Read: any auth user (needed for redemption lookup + listing)
-          allow read: if request.auth != null;
+          // Kept open to authenticated users until invite redemption moves to a trusted API.
+          allow read: if signedIn();
 
-          // Create: auth users (admin creates owner codes, owner creates member codes)
-          allow create: if request.auth != null &&
-            request.resource.data.keys().hasAll([
-              'code','buildingId','roomId','role','redeemed','redeemedAt',
-              'redeemedByDeviceId','createdBy','expiresAt','permissions','createdAt'
-            ]) &&
-            request.resource.data.redeemed == false &&
-            request.resource.data.role in ['owner','member'];
+          allow create: if signedIn() &&
+            inviteCodeShape() &&
+            request.resource.data.buildingId == buildingId &&
+            request.resource.data.roomId == roomId &&
+            (
+              isAdmin() ||
+              (
+                isRoomOwner(buildingId, roomId) &&
+                request.resource.data.createdBy == residentProfile(buildingId, roomId).deviceId
+              )
+            );
 
-          // Update: only to mark as redeemed (set redeemed=true, redeemedAt, redeemedByDeviceId)
-          allow update: if request.auth != null &&
+          allow update: if signedIn() &&
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['redeemed','redeemedAt','redeemedByDeviceId']) &&
             request.resource.data.redeemed == true &&
-            resource.data.redeemed == false;
+            resource.data.redeemed == false &&
+            request.resource.data.redeemedAt == request.time &&
+            isDeviceUser(buildingId, roomId, request.resource.data.redeemedByDeviceId);
 
-          // Delete: auth users (admin/owner housekeeping)
-          allow delete: if request.auth != null;
+          allow delete: if isAdmin() || isRoomOwner(buildingId, roomId);
         }
 
-        // Devices: create/update by auth, no public read
         match /devices/{deviceId} {
-          allow read: if request.auth != null;
-          allow create: if request.auth != null;
-          allow update: if request.auth != null;
-          allow delete: if request.auth != null;
+          allow read: if isAdmin() ||
+            resource.data.userId == request.auth.uid ||
+            isRoomOwner(buildingId, roomId);
+
+          allow create: if signedIn() &&
+            request.resource.data.userId == request.auth.uid &&
+            request.resource.data.keys().hasAll([
+              'fcmToken','platform','role','userId','codeId','permissions','name','registeredAt'
+            ]) &&
+            request.resource.data.role in ['owner','member'] &&
+            request.resource.data.platform in ['ios','android','web'] &&
+            request.resource.data.permissions.keys().hasOnly(['notify', 'respond']) &&
+            request.resource.data.permissions.notify is bool &&
+            request.resource.data.permissions.respond is bool &&
+            request.resource.data.name is string &&
+            request.resource.data.name.size() <= 40 &&
+            request.resource.data.registeredAt == request.time;
+
+          allow update: if isAdmin() ||
+            (
+              resource.data.userId == request.auth.uid &&
+              request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['fcmToken','platform','role','userId','codeId','permissions','name']) &&
+              request.resource.data.userId == resource.data.userId &&
+              request.resource.data.role == resource.data.role &&
+              request.resource.data.codeId == resource.data.codeId &&
+              request.resource.data.permissions == resource.data.permissions
+            );
+
+          allow delete: if isAdmin() ||
+            resource.data.userId == request.auth.uid ||
+            isRoomOwner(buildingId, roomId);
         }
 
-        // Arrivals
+        match /residents/{uid} {
+          allow read: if isAdmin() || request.auth.uid == uid || isRoomOwner(buildingId, roomId);
+
+          allow create, update: if signedIn() &&
+            request.auth.uid == uid &&
+            request.resource.data.keys().hasAll(['deviceId','role','permissions','name','updatedAt']) &&
+            request.resource.data.role in ['owner','member'] &&
+            request.resource.data.permissions.keys().hasOnly(['notify', 'respond']) &&
+            request.resource.data.permissions.notify is bool &&
+            request.resource.data.permissions.respond is bool &&
+            request.resource.data.name is string &&
+            request.resource.data.name.size() <= 40 &&
+            request.resource.data.updatedAt == request.time &&
+            isDeviceUser(buildingId, roomId, request.resource.data.deviceId) &&
+            get(devicePath(buildingId, roomId, request.resource.data.deviceId)).data.role == request.resource.data.role &&
+            get(devicePath(buildingId, roomId, request.resource.data.deviceId)).data.permissions == request.resource.data.permissions;
+
+          allow delete: if isAdmin() || request.auth.uid == uid;
+        }
+
         match /arrivals/{arrivalId} {
           allow read: if true;
 
-          allow create: if
-            request.auth != null &&
-            request.resource.data.keys().hasAll([
-              'buildingId','roomId','roomNumber','type','waitTime',
-              'status','response','reminderCount','createdAt','expiresAt'
-            ]) &&
-            request.resource.data.status == 'pending' &&
-            request.resource.data.response == null &&
-            request.resource.data.reminderCount == 0 &&
-            request.resource.data.type in ['package','food','guest','other'] &&
-            request.resource.data.waitTime in ['1min','2min','5min'];
+          allow create: if signedIn() && arrivalCreateShape(buildingId, roomId);
 
-          allow update: if
-            request.auth != null &&
+          allow update: if signedIn() &&
+            unchangedArrivalIdentity() &&
             (
-              // Reminder increment (visitor)
               (
+                visitorOwnsArrival() &&
                 request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reminderCount']) &&
                 request.resource.data.reminderCount <= 3 &&
                 request.resource.data.reminderCount == resource.data.reminderCount + 1 &&
                 resource.data.status == 'pending'
               ) ||
-              // Visitor rings resident
               (
+                visitorOwnsArrival() &&
                 request.resource.data.diff(resource.data).affectedKeys()
                   .hasOnly(['ringCount','lastRingAt','lastRingBy']) &&
                 request.resource.data.ringCount <= 3 &&
@@ -81,20 +226,20 @@ service cloud.firestore {
                 request.resource.data.lastRingAt == request.time &&
                 resource.data.status == 'pending'
               ) ||
-              // Resident rings visitor while visitor status page is open
               (
                 request.resource.data.diff(resource.data).affectedKeys()
-                  .hasOnly(['residentRingCount','lastResidentRingAt','lastRingBy']) &&
+                  .hasOnly(['residentRingCount','lastResidentRingAt','lastResidentRingByDeviceId','lastRingBy']) &&
                 request.resource.data.residentRingCount <= 3 &&
                 request.resource.data.residentRingCount == resource.data.residentRingCount + 1 &&
                 request.resource.data.lastRingBy == 'resident' &&
                 request.resource.data.lastResidentRingAt == request.time &&
-                resource.data.status in ['pending','responded']
+                resource.data.status in ['pending','responded'] &&
+                resource.data.visitorAck == null &&
+                deviceCanRespond(buildingId, roomId, request.resource.data.lastResidentRingByDeviceId)
               ) ||
-              // Response (resident)
               (
                 request.resource.data.diff(resource.data).affectedKeys()
-                  .hasOnly(['response','responseMessage','status','respondedByName','respondedByRole']) &&
+                  .hasOnly(['response','responseMessage','status','respondedByName','respondedByRole','respondedByDeviceId']) &&
                 request.resource.data.response in ['coming_down','leave_in_lobby','no_need_to_wait'] &&
                 (
                   request.resource.data.responseMessage == null ||
@@ -104,34 +249,36 @@ service cloud.firestore {
                   )
                 ) &&
                 request.resource.data.status == 'responded' &&
-                resource.data.status == 'pending'
+                resource.data.status == 'pending' &&
+                request.resource.data.respondedByName is string &&
+                request.resource.data.respondedByName.size() <= 40 &&
+                request.resource.data.respondedByRole in ['owner','member'] &&
+                deviceCanRespond(buildingId, roomId, request.resource.data.respondedByDeviceId)
               ) ||
-              // Visitor ack — optionally also closes arrival (status=expired) on no-response flow
               (
+                visitorOwnsArrival() &&
                 request.resource.data.diff(resource.data).affectedKeys()
                   .hasOnly(['visitorAck','visitorAckTime','status']) &&
                 request.resource.data.visitorAck is string &&
                 request.resource.data.visitorAck.size() <= 200 &&
-                (
-                  !('status' in request.resource.data.diff(resource.data).affectedKeys()) ||
-                  request.resource.data.status == 'expired'
-                )
+                request.resource.data.visitorAckTime == request.time &&
+                resource.data.visitorAck == null &&
+                request.resource.data.status in [resource.data.status, 'expired']
               ) ||
-              // Expire (Cloud Function)
               (
+                isAdmin() &&
                 request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
                 request.resource.data.status == 'expired'
               )
             );
 
-          allow delete: if request.auth != null;
+          allow delete: if isAdmin();
         }
       }
     }
 
-    // CollectionGroup rule for invite code lookup across all rooms
     match /{path=**}/inviteCodes/{codeId} {
-      allow read: if request.auth != null;
+      allow read: if signedIn();
     }
   }
 }

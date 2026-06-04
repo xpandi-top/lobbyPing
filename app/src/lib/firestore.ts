@@ -13,8 +13,19 @@ import {
   orderBy,
   Timestamp,
   serverTimestamp,
+  runTransaction,
 } from 'firebase/firestore'
-import { db } from './firebase'
+import { auth, db } from './firebase'
+import {
+  ARRIVAL_TTL_MS,
+  canRespondToArrival,
+  canRingResident,
+  canRingVisitor,
+  canSendReminder,
+  canVisitorAck,
+  nextStatusForVisitorAck,
+  normalizeResponseMessage,
+} from './arrivalPolicy'
 import type {
   Building, Room, Device, Arrival, InviteCode, InviteCodePermissions,
   DeliveryInstructions, ArrivalType, WaitTime, ResidentResponse, UserRole,
@@ -214,6 +225,16 @@ export async function registerDevice(
   permissions: InviteCodePermissions,
   name: string
 ): Promise<string> {
+  async function writeResidentProfile(deviceId: string) {
+    await setDoc(doc(db, 'buildings', buildingId, 'rooms', roomId, 'residents', userId), {
+      deviceId,
+      role,
+      permissions,
+      name,
+      updatedAt: serverTimestamp(),
+    })
+  }
+
   // Upsert by fcmToken
   const q = query(
     collection(db, 'buildings', buildingId, 'rooms', roomId, 'devices'),
@@ -222,6 +243,7 @@ export async function registerDevice(
   const snap = await getDocs(q)
   if (!snap.empty) {
     await updateDoc(snap.docs[0].ref, { fcmToken, platform, role, userId, codeId, permissions, name })
+    await writeResidentProfile(snap.docs[0].id)
     return snap.docs[0].id
   }
 
@@ -230,7 +252,26 @@ export async function registerDevice(
     fcmToken, platform, role, userId, codeId, permissions, name,
     registeredAt: serverTimestamp(),
   })
+  await writeResidentProfile(ref.id)
   return ref.id
+}
+
+export async function ensureResidentProfile(
+  buildingId: string,
+  roomId: string,
+  deviceId: string,
+  role: UserRole,
+  userId: string,
+  permissions: InviteCodePermissions,
+  name: string
+): Promise<void> {
+  await setDoc(doc(db, 'buildings', buildingId, 'rooms', roomId, 'residents', userId), {
+    deviceId,
+    role,
+    permissions,
+    name,
+    updatedAt: serverTimestamp(),
+  })
 }
 
 export async function listDevices(buildingId: string, roomId: string): Promise<Device[]> {
@@ -270,17 +311,19 @@ export async function createArrival(
   waitTime: WaitTime
 ): Promise<string> {
   const now = Timestamp.now()
-  const expiresAt = Timestamp.fromMillis(now.toMillis() + 30 * 60 * 1000)
+  const expiresAt = Timestamp.fromMillis(now.toMillis() + ARRIVAL_TTL_MS)
+  const visitorUid = auth.currentUser?.uid
+  if (!visitorUid) throw new Error('Visitor session is not ready')
   const ref = doc(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'))
   await setDoc(ref, {
-    buildingId, roomId, roomNumber, type, waitTime,
+    buildingId, roomId, visitorUid, roomNumber, type, waitTime,
     status: 'pending', response: null, responseMessage: null,
-    respondedByName: null, respondedByRole: null,
+    respondedByName: null, respondedByRole: null, respondedByDeviceId: null,
     visitorAck: null, visitorAckTime: null,
     reminderCount: 0,
     ringCount: 0, lastRingAt: null, lastRingBy: null,
-    residentRingCount: 0, lastResidentRingAt: null,
-    createdAt: now, expiresAt,
+    residentRingCount: 0, lastResidentRingAt: null, lastResidentRingByDeviceId: null,
+    createdAt: serverTimestamp(), expiresAt,
   })
   return ref.id
 }
@@ -319,18 +362,24 @@ export async function respondToArrival(
   response: ResidentResponse,
   responderName: string,
   responderRole: UserRole,
+  responderDeviceId: string,
   responseMessage?: string
 ): Promise<void> {
-  await updateDoc(
-    doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
-    {
+  const ref = doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId)
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists()) throw new Error('Arrival not found')
+    const arrival = { id: snap.id, ...snap.data() } as Arrival
+    if (!canRespondToArrival(arrival)) throw new Error('Arrival is no longer pending')
+    tx.update(ref, {
       response,
-      responseMessage: responseMessage?.trim() || null,
+      responseMessage: normalizeResponseMessage(responseMessage),
       status: 'responded',
       respondedByName: responderName,
       respondedByRole: responderRole,
-    }
-  )
+      respondedByDeviceId: responderDeviceId,
+    })
+  })
 }
 
 export async function sendVisitorAck(
@@ -340,14 +389,18 @@ export async function sendVisitorAck(
   message: string,
   closeArrival = false  // true when visitor is done (no-response flow) — marks status expired
 ): Promise<void> {
-  await updateDoc(
-    doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
-    {
+  const ref = doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId)
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists()) throw new Error('Arrival not found')
+    const arrival = { id: snap.id, ...snap.data() } as Arrival
+    if (!canVisitorAck(arrival)) throw new Error('Visitor reply is closed')
+    tx.update(ref, {
       visitorAck: message,
       visitorAckTime: serverTimestamp(),
-      ...(closeArrival ? { status: 'expired' } : {}),
-    }
-  )
+      status: nextStatusForVisitorAck(arrival.status, closeArrival),
+    })
+  })
 }
 
 export async function sendReminder(
@@ -356,10 +409,15 @@ export async function sendReminder(
   arrivalId: string,
   currentCount: number
 ): Promise<void> {
-  await updateDoc(
-    doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
-    { reminderCount: currentCount + 1 }
-  )
+  const ref = doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId)
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists()) throw new Error('Arrival not found')
+    const arrival = { id: snap.id, ...snap.data() } as Arrival
+    if (arrival.reminderCount !== currentCount) throw new Error('Reminder state changed, try again')
+    if (!canSendReminder(arrival)) throw new Error('Reminder limit reached')
+    tx.update(ref, { reminderCount: arrival.reminderCount + 1 })
+  })
 }
 
 export async function ringResident(
@@ -368,28 +426,40 @@ export async function ringResident(
   arrivalId: string,
   currentRingCount: number
 ): Promise<void> {
-  await updateDoc(
-    doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
-    {
-      ringCount: currentRingCount + 1,
+  const ref = doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId)
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists()) throw new Error('Arrival not found')
+    const arrival = { id: snap.id, ...snap.data() } as Arrival
+    if (arrival.ringCount !== currentRingCount) throw new Error('Ring state changed, try again')
+    if (!canRingResident(arrival)) throw new Error('Ring limit reached')
+    tx.update(ref, {
+      ringCount: arrival.ringCount + 1,
       lastRingAt: serverTimestamp(),
       lastRingBy: 'visitor',
-    }
-  )
+    })
+  })
 }
 
 export async function ringVisitor(
   buildingId: string,
   roomId: string,
   arrivalId: string,
-  currentResidentRingCount: number
+  currentResidentRingCount: number,
+  residentDeviceId: string
 ): Promise<void> {
-  await updateDoc(
-    doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
-    {
-      residentRingCount: currentResidentRingCount + 1,
+  const ref = doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId)
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists()) throw new Error('Arrival not found')
+    const arrival = { id: snap.id, ...snap.data() } as Arrival
+    if (arrival.residentRingCount !== currentResidentRingCount) throw new Error('Ring state changed, try again')
+    if (!canRingVisitor(arrival)) throw new Error('Visitor ring limit reached')
+    tx.update(ref, {
+      residentRingCount: arrival.residentRingCount + 1,
       lastResidentRingAt: serverTimestamp(),
+      lastResidentRingByDeviceId: residentDeviceId,
       lastRingBy: 'resident',
-    }
-  )
+    })
+  })
 }
