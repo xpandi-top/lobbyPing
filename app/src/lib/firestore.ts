@@ -274,7 +274,7 @@ export async function createArrival(
   const ref = doc(collection(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals'))
   await setDoc(ref, {
     buildingId, roomId, roomNumber, type, waitTime,
-    status: 'pending', response: null,
+    status: 'pending', response: null, responseMessage: null,
     respondedByName: null, respondedByRole: null,
     visitorAck: null, visitorAckTime: null,
     reminderCount: 0,
@@ -318,11 +318,18 @@ export async function respondToArrival(
   arrivalId: string,
   response: ResidentResponse,
   responderName: string,
-  responderRole: UserRole
+  responderRole: UserRole,
+  responseMessage?: string
 ): Promise<void> {
   await updateDoc(
     doc(db, 'buildings', buildingId, 'rooms', roomId, 'arrivals', arrivalId),
-    { response, status: 'responded', respondedByName: responderName, respondedByRole: responderRole }
+    {
+      response,
+      responseMessage: responseMessage?.trim() || null,
+      status: 'responded',
+      respondedByName: responderName,
+      respondedByRole: responderRole,
+    }
   )
 }
 

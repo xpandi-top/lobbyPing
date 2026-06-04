@@ -74,6 +74,7 @@ export interface Arrival {
   waitTime: WaitTime
   status: ArrivalStatus
   response: ResidentResponse | null
+  responseMessage: string | null
   respondedByName: string | null
   respondedByRole: UserRole | null
   visitorAck: string | null        // visitor's acknowledgment after resident responds (or final msg)

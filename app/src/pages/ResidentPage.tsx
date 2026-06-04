@@ -354,6 +354,8 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
   const [ringingVisitor, setRingingVisitor] = useState(false)
   const [ringCooldown, setRingCooldown] = useState(0)
   const [ringNotice, setRingNotice] = useState('')
+  const [showCustomResponse, setShowCustomResponse] = useState(false)
+  const [customResponse, setCustomResponse] = useState('')
   const ringCooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const seenVisitorRingCount = useRef<number | null>(null)
   const isExpired = arrival.status === 'expired' || arrival.expiresAt.toMillis() < Date.now()
@@ -404,11 +406,11 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
     }, 1000)
   }
 
-  async function handleResponse(response: ResidentResponse) {
+  async function handleResponse(response: ResidentResponse, message?: string) {
     if (responding || !canRespond) return
     setResponding(true)
     try {
-      await respondToArrival(buildingId, roomId, arrival.id, response, responderName, responderRole)
+      await respondToArrival(buildingId, roomId, arrival.id, response, responderName, responderRole, message)
       // Notify the room's OTHER devices that this arrival was handled.
       triggerPush(buildingId, roomId, arrival.id, 'responded', responderDeviceId)
       toast.success('Response sent')
@@ -457,6 +459,42 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
             {residentRingCount}/{MAX_RINGS} visitor rings sent
           </p>
         )}
+      </div>
+    )
+  }
+
+  function renderCustomResponse() {
+    if (!canRespond) return null
+    if (!showCustomResponse) {
+      return (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={() => setShowCustomResponse(true)}
+          disabled={responding}
+        >
+          Write custom message
+        </Button>
+      )
+    }
+    return (
+      <div className="space-y-2">
+        <Textarea
+          placeholder="Type a message for the visitor..."
+          maxLength={200}
+          rows={3}
+          value={customResponse}
+          onChange={(e) => setCustomResponse(e.target.value)}
+        />
+        <Button
+          type="button"
+          className="w-full"
+          disabled={!customResponse.trim() || responding}
+          onClick={() => handleResponse('coming_down', customResponse.trim())}
+        >
+          {responding ? 'Sending...' : 'Send Custom Message'}
+        </Button>
       </div>
     )
   }
@@ -520,6 +558,9 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
               <p className="text-sm text-muted-foreground">
                 Responded: <span className="font-medium text-foreground">{RESPONSE_OPTIONS.find(r => r.value === arrival.response)?.label}</span>
               </p>
+              {arrival.responseMessage && (
+                <p className="text-sm font-medium text-foreground">{arrival.responseMessage}</p>
+              )}
               {arrival.respondedByName && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                   {arrival.respondedByRole === 'owner' ? <Crown className="h-3 w-3" /> : <Users className="h-3 w-3" />}
@@ -564,6 +605,7 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
                       <Icon className="h-3.5 w-3.5 shrink-0" />{label}
                     </button>
                   ))}
+                  {renderCustomResponse()}
                 </div>
               </div>
             )}
@@ -578,6 +620,7 @@ function ArrivalCard({ arrival, buildingId, roomId, canRespond, responderName, r
                 <Icon className="h-4 w-4 shrink-0" /><span className="font-medium text-sm">{label}</span>
               </button>
             ))}
+            {renderCustomResponse()}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground italic">You don't have permission to respond.</p>

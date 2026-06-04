@@ -20,6 +20,7 @@ const MAX_REMINDERS = 3
 const REMINDER_COOLDOWN_MS = 30_000
 const MAX_RINGS = 3
 const RING_COOLDOWN_MS = 20_000
+const VISITOR_REPLY_TIMEOUT_SECONDS = 60
 
 const TYPE_LABELS: Record<ArrivalType, string> = {
   package: 'Package', food: 'Food Delivery', guest: 'Guest', other: 'Other',
@@ -189,11 +190,14 @@ export default function StatusPage() {
   const [ringCooldown, setRingCooldown] = useState(0)
   const [ackSent, setAckSent] = useState(false)
   const [visitorRingNotice, setVisitorRingNotice] = useState('')
+  const [replyTimeoutSeconds, setReplyTimeoutSeconds] = useState(VISITOR_REPLY_TIMEOUT_SECONDS)
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const ringCooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const replyTimeoutRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const seenResidentRingCount = useRef<number | null>(null)
   const residentRingCountForAlert = arrival?.residentRingCount ?? null
   const lastRingByForAlert = arrival?.lastRingBy ?? null
+  const visitorReplyPending = arrival?.status === 'responded' && !!arrival.response && !arrival.visitorAck && !ackSent
 
   useEffect(() => {
     if (!buildingId || !roomId || !arrivalId) return
@@ -228,8 +232,34 @@ export default function StatusPage() {
     return () => {
       if (cooldownRef.current) clearInterval(cooldownRef.current)
       if (ringCooldownRef.current) clearInterval(ringCooldownRef.current)
+      if (replyTimeoutRef.current) clearInterval(replyTimeoutRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (replyTimeoutRef.current) {
+      clearInterval(replyTimeoutRef.current)
+      replyTimeoutRef.current = null
+    }
+    if (!visitorReplyPending) {
+      setReplyTimeoutSeconds(VISITOR_REPLY_TIMEOUT_SECONDS)
+      return
+    }
+    setReplyTimeoutSeconds(VISITOR_REPLY_TIMEOUT_SECONDS)
+    replyTimeoutRef.current = setInterval(() => {
+      setReplyTimeoutSeconds((prev) => {
+        if (prev <= 1) {
+          if (replyTimeoutRef.current) clearInterval(replyTimeoutRef.current)
+          navigate(`/visit?b=${buildingId}`)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => {
+      if (replyTimeoutRef.current) clearInterval(replyTimeoutRef.current)
+    }
+  }, [visitorReplyPending, buildingId, navigate])
 
   const createdAtMs = arrival?.createdAt?.toMillis() ?? Date.now()
   const isPending = arrival?.status === 'pending'
@@ -410,12 +440,21 @@ export default function StatusPage() {
               <>
                 <div className="text-center space-y-2">
                   <CheckCircle2 className="h-10 w-10 mx-auto text-green-500" />
-                  <p className="text-lg font-semibold">{RESPONSE_MESSAGES[arrival.response!].title}</p>
-                  <p className="text-sm text-muted-foreground">{RESPONSE_MESSAGES[arrival.response!].body}</p>
+                  <p className="text-lg font-semibold">
+                    {arrival.responseMessage ? 'Resident replied' : RESPONSE_MESSAGES[arrival.response!].title}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {arrival.responseMessage || RESPONSE_MESSAGES[arrival.response!].body}
+                  </p>
                   {arrival.respondedByName && (
                     <Badge variant="secondary" className="text-xs">
                       {arrival.respondedByName}
                     </Badge>
+                  )}
+                  {visitorReplyPending && (
+                    <p className="text-xs text-muted-foreground">
+                      Reply closes in {replyTimeoutSeconds}s
+                    </p>
                   )}
                 </div>
                 {isPending && !isExpired && renderRingResidentButton(ringCount)}

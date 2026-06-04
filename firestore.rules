@@ -94,8 +94,15 @@ service cloud.firestore {
               // Response (resident)
               (
                 request.resource.data.diff(resource.data).affectedKeys()
-                  .hasOnly(['response','status','respondedByName','respondedByRole']) &&
+                  .hasOnly(['response','responseMessage','status','respondedByName','respondedByRole']) &&
                 request.resource.data.response in ['coming_down','leave_in_lobby','no_need_to_wait'] &&
+                (
+                  request.resource.data.responseMessage == null ||
+                  (
+                    request.resource.data.responseMessage is string &&
+                    request.resource.data.responseMessage.size() <= 200
+                  )
+                ) &&
                 request.resource.data.status == 'responded' &&
                 resource.data.status == 'pending'
               ) ||

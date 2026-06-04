@@ -103,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (isResponded) {
       const who = (arrival.respondedByName as string) || 'Someone'
       title = `Room ${roomNumber} — handled`
-      body = `${who}: ${RESPONSE_LABEL[arrival.response as string] ?? 'Responded'}`
+      body = `${who}: ${(arrival.responseMessage as string) || RESPONSE_LABEL[arrival.response as string] || 'Responded'}`
     } else if (isRing) {
       title = `Ring — Room ${roomNumber}`
       body = 'Visitor is trying to reach you. Tap to respond.'

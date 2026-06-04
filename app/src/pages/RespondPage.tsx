@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { CheckCircle2, ArrowDownToLine, XCircle, AlertCircle } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import { subscribeArrival, respondToArrival } from '@/lib/firestore'
 import { triggerPush } from '@/lib/notify'
 import { getSavedRoom } from '@/lib/storage'
@@ -61,6 +63,8 @@ export default function RespondPage() {
 
   const [arrival, setArrival] = useState<Arrival | null | undefined>(undefined)
   const [responding, setResponding] = useState(false)
+  const [showCustom, setShowCustom] = useState(false)
+  const [customMessage, setCustomMessage] = useState('')
 
   useEffect(() => {
     if (!buildingId || !roomId || !arrivalId) return
@@ -72,11 +76,11 @@ export default function RespondPage() {
   const responderName = savedRoom?.name ?? 'Resident'
   const responderRole = savedRoom?.role ?? 'member'
 
-  async function handleResponse(response: ResidentResponse) {
+  async function handleResponse(response: ResidentResponse, message?: string) {
     if (!arrival || responding) return
     setResponding(true)
     try {
-      await respondToArrival(buildingId, roomId, arrivalId, response, responderName, responderRole)
+      await respondToArrival(buildingId, roomId, arrivalId, response, responderName, responderRole, message)
       triggerPush(buildingId, roomId, arrivalId, 'responded', savedRoom?.deviceId)
       toast.success('Response sent')
     } catch {
@@ -136,30 +140,57 @@ export default function RespondPage() {
                 <p className="text-sm text-muted-foreground mt-1">
                   {RESPONSES.find(r => r.value === arrival.response)?.label}
                 </p>
+                {arrival.responseMessage && (
+                  <p className="text-sm font-medium mt-2">{arrival.responseMessage}</p>
+                )}
               </div>
             ) : isExpired ? (
               <div className="rounded-lg bg-muted p-4 text-center">
                 <p className="text-muted-foreground text-sm">This notification has expired.</p>
               </div>
             ) : (
-              RESPONSES.map(({ value, label, description, icon: Icon, color }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => handleResponse(value)}
-                  disabled={responding}
-                  className={cn(
-                    'flex w-full items-center gap-4 rounded-lg border p-4 text-left transition-colors disabled:opacity-50',
-                    color
-                  )}
-                >
-                  <Icon className="h-5 w-5 shrink-0" />
-                  <div>
-                    <p className="font-semibold text-sm">{label}</p>
-                    <p className="text-xs opacity-75">{description}</p>
+              <>
+                {RESPONSES.map(({ value, label, description, icon: Icon, color }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => handleResponse(value)}
+                    disabled={responding}
+                    className={cn(
+                      'flex w-full items-center gap-4 rounded-lg border p-4 text-left transition-colors disabled:opacity-50',
+                      color
+                    )}
+                  >
+                    <Icon className="h-5 w-5 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-sm">{label}</p>
+                      <p className="text-xs opacity-75">{description}</p>
+                    </div>
+                  </button>
+                ))}
+                {!showCustom ? (
+                  <Button variant="outline" className="w-full" onClick={() => setShowCustom(true)} disabled={responding}>
+                    Write custom message
+                  </Button>
+                ) : (
+                  <div className="space-y-2">
+                    <Textarea
+                      placeholder="Type a message for the visitor..."
+                      maxLength={200}
+                      rows={3}
+                      value={customMessage}
+                      onChange={(e) => setCustomMessage(e.target.value)}
+                    />
+                    <Button
+                      className="w-full"
+                      disabled={!customMessage.trim() || responding}
+                      onClick={() => handleResponse('coming_down', customMessage.trim())}
+                    >
+                      {responding ? 'Sending...' : 'Send Custom Message'}
+                    </Button>
                   </div>
-                </button>
-              ))
+                )}
+              </>
             )}
           </CardContent>
         </Card>
