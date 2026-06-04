@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { Bell, Package, Utensils, Users, HelpCircle, Clock, MapPin } from 'lucide-react'
+import { Bell, BellRing, Package, Utensils, Users, HelpCircle, Clock, MapPin } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -143,7 +143,7 @@ export default function VisitorPage() {
               <span>{buildingName}</span>
             </div>
           ) : (
-            <p className="text-muted-foreground text-sm">Notify a resident you've arrived</p>
+            <p className="text-muted-foreground text-sm">Ring a resident when you've arrived</p>
           )}
         </div>
 
@@ -272,7 +272,14 @@ export default function VisitorPage() {
                 disabled={step === 'sending'}
                 className="w-full h-12 text-base mt-2"
               >
-                {step === 'sending' ? 'Sending…' : 'Notify Resident'}
+                {step === 'sending' ? (
+                  'Ringing…'
+                ) : (
+                  <>
+                    <BellRing className="h-4 w-4 mr-2" />
+                    Ring / Notify Resident
+                  </>
+                )}
               </Button>
               <Button variant="ghost" onClick={() => setStep('type')} className="w-full" disabled={step === 'sending'}>
                 Back
