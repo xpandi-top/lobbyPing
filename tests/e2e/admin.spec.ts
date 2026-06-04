@@ -10,13 +10,21 @@ test.describe('admin — building and room management', () => {
   test('admin panel loads with correct key', async ({ page }) => {
     await page.goto(`${PATH}/admin?key=${ADMIN_KEY}`)
     await waitForAuth(page)
+    // Wait for admin custom-token sign-in to complete
+    await page.locator('text=Signing in…').waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => undefined)
     await expect(page.getByText('LobbyPing Admin')).toBeVisible()
     await expect(page.getByRole('button', { name: 'New Building' })).toBeVisible()
   })
 
-  test('create building → appears in list → click into detail', async ({ page }) => {
+  async function gotoAdmin(page: import('@playwright/test').Page) {
     await page.goto(`${PATH}/admin?key=${ADMIN_KEY}`)
     await waitForAuth(page)
+    await page.locator('text=Signing in…').waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => undefined)
+    await expect(page.getByText('LobbyPing Admin')).toBeVisible()
+  }
+
+  test('create building → appears in list → click into detail', async ({ page }) => {
+    await gotoAdmin(page)
 
     const slug = `e2e-admin-${Date.now()}`
     await page.getByRole('button', { name: 'New Building' }).click()
@@ -56,8 +64,7 @@ test.describe('admin — building and room management', () => {
   })
 
   test('create room and delete it', async ({ page }) => {
-    await page.goto(`${PATH}/admin?key=${ADMIN_KEY}`)
-    await waitForAuth(page)
+    await gotoAdmin(page)
 
     const slug = `e2e-room-del-${Date.now()}`
     // Create building first
@@ -83,8 +90,7 @@ test.describe('admin — building and room management', () => {
   })
 
   test('QR code link contains correct building slug', async ({ page }) => {
-    await page.goto(`${PATH}/admin?key=${ADMIN_KEY}`)
-    await waitForAuth(page)
+    await gotoAdmin(page)
 
     const slug = `e2e-qr-${Date.now()}`
     await page.getByRole('button', { name: 'New Building' }).click()

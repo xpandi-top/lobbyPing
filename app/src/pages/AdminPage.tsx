@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { signInWithCustomToken } from 'firebase/auth'
+import { auth } from '@/lib/firebase'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -26,6 +28,7 @@ import type { Building, Room, InviteCode } from '@/lib/types'
 import { appUrl } from '@/lib/utils'
 
 const ADMIN_KEY = import.meta.env.VITE_ADMIN_KEY ?? 'admin'
+const ADMIN_TOKEN_URL = import.meta.env.VITE_NOTIFY_URL?.replace('/api/notify', '/api/admin-token') ?? ''
 
 function generateCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -410,6 +413,8 @@ export default function AdminPage() {
   const key = searchParams.get('key')
   const [view, setView] = useState<AdminView>(() => searchParams.get('b') ? 'detail' : 'list')
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null)
+  const [adminReady, setAdminReady] = useState(false)
+  const adminSignInRef = useRef(false)
 
   useEffect(() => {
     const bId = searchParams.get('b')
@@ -419,6 +424,25 @@ export default function AdminPage() {
       })
     }
   }, [])
+
+  // Exchange admin key for a Firebase custom token with admin=true claims.
+  // This is required for Firestore write rules that check request.auth.token.admin.
+  useEffect(() => {
+    if (key !== ADMIN_KEY || adminSignInRef.current) return
+    adminSignInRef.current = true
+    if (!ADMIN_TOKEN_URL) { setAdminReady(true); return }
+
+    const uid = auth.currentUser?.uid ?? 'admin-user'
+    fetch(ADMIN_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adminKey: key, uid }),
+    })
+      .then((res) => res.ok ? res.json() : Promise.reject(res.status))
+      .then((data: { token: string }) => signInWithCustomToken(auth, data.token))
+      .catch((err) => console.warn('[admin] custom token sign-in failed:', err))
+      .finally(() => setAdminReady(true))
+  }, [key])
 
   if (key !== ADMIN_KEY) {
     return (
@@ -442,6 +466,14 @@ export default function AdminPage() {
     setSelectedBuilding(null)
     setSearchParams({ key: key! })
     setView('list')
+  }
+
+  if (!adminReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-muted-foreground">Signing in…</p>
+      </div>
+    )
   }
 
   return (

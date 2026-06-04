@@ -4,6 +4,7 @@
   "outputDirectory": "api-public",
   "framework": null,
   "functions": {
-    "api/notify.ts": { "maxDuration": 10 }
+    "api/notify.ts": { "maxDuration": 10 },
+    "api/admin-token.ts": { "maxDuration": 10 }
   }
 }
