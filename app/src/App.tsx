@@ -18,17 +18,24 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false)
 
   useEffect(() => {
+    // Safety timeout — if Firebase auth hangs (common on iOS), unblock the UI
+    const timeout = setTimeout(() => {
+      console.warn('[Auth] Timed out waiting for Firebase auth, proceeding anyway')
+      setAuthReady(true)
+    }, 5000)
+
     const unsub = onAuthStateChanged(auth, (user) => {
+      clearTimeout(timeout)
       if (!user) {
         signInAnonymously(auth).catch((err) => {
           console.error('[Auth] Anonymous sign-in failed:', err)
-          setAuthReady(true) // still render even if auth fails
+          setAuthReady(true)
         })
       } else {
         setAuthReady(true)
       }
     })
-    return unsub
+    return () => { clearTimeout(timeout); unsub() }
   }, [])
 
   if (!authReady) {
