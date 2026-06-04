@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { initializeApp, getApps, cert } from 'firebase-admin/app'
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore'
 
 const NOTIFY_URL = process.env.NOTIFY_URL ?? process.env.VITE_NOTIFY_URL ?? ''
+const SKIP = !NOTIFY_URL || !process.env.FIREBASE_SERVICE_ACCOUNT
 
 // ── Firebase Admin helpers ─────────────────────────────────────────────────
 
@@ -66,11 +67,8 @@ async function post(body: Record<string, unknown>, headers: Record<string, strin
 
 // ── Setup / Teardown ────────────────────────────────────────────────────────
 
-beforeAll(async (ctx) => {
-  if (!NOTIFY_URL || !process.env.FIREBASE_SERVICE_ACCOUNT) {
-    ctx.skip()
-    return
-  }
+beforeAll(async () => {
+  if (SKIP) return
 
   const db = getDb()
   const slug = `api-test-${Date.now()}`
@@ -95,7 +93,7 @@ afterAll(async () => {
 
 // ── HTTP method + CORS ─────────────────────────────────────────────────────
 
-describe('/api/notify — routing and CORS', () => {
+describe.skipIf(SKIP)('/api/notify — routing and CORS', () => {
   it('OPTIONS preflight returns 204', async () => {
     const res = await fetch(NOTIFY_URL, {
       method: 'OPTIONS',
@@ -129,7 +127,7 @@ describe('/api/notify — routing and CORS', () => {
 
 // ── Input validation ───────────────────────────────────────────────────────
 
-describe('/api/notify — validation', () => {
+describe.skipIf(SKIP)('/api/notify — validation', () => {
   it('missing buildingId → 400', async () => {
     const res = await post({ roomId: 'r', arrivalId: 'a' })
     expect(res.status).toBe(400)
@@ -158,7 +156,7 @@ describe('/api/notify — validation', () => {
 
 // ── Rate limiting ──────────────────────────────────────────────────────────
 
-describe('/api/notify — rate limiting', () => {
+describe.skipIf(SKIP)('/api/notify — rate limiting', () => {
   it('9 requests in burst → 9th returns 429', async () => {
     const arrivalId = `rate-limit-test-${Date.now()}`
     const body = { buildingId: testBuildingId, roomId: testRoomId, arrivalId }
@@ -176,7 +174,7 @@ describe('/api/notify — rate limiting', () => {
 
 // ── Anti-abuse gating ──────────────────────────────────────────────────────
 
-describe('/api/notify — anti-abuse checks', () => {
+describe.skipIf(SKIP)('/api/notify — anti-abuse checks', () => {
   it('responded arrival + kind=arrival → skipped', async () => {
     const arrivalId = await seedArrival({ status: 'responded', response: 'coming_down' })
     const res = await post({ buildingId: testBuildingId, roomId: testRoomId, arrivalId, kind: 'arrival' })
@@ -230,7 +228,7 @@ describe('/api/notify — anti-abuse checks', () => {
 
 // ── Push delivery ──────────────────────────────────────────────────────────
 
-describe('/api/notify — push delivery', () => {
+describe.skipIf(SKIP)('/api/notify — push delivery', () => {
   it('no devices registered → sent:0', async () => {
     const arrivalId = await seedArrival()
     const res = await post({ buildingId: testBuildingId, roomId: testRoomId, arrivalId, kind: 'arrival' })
